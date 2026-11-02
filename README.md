@@ -10,6 +10,9 @@ O site abre com uma tela de senha. Os prompts ficam criptografados em `ias/tranc
 senha por PBKDF2), então o repositório pode ser público sem expor nada: o site destranca no próprio aparelho.
 Os prompts abertos (`ias/prompts/*.md`) ficam só no computador e não vão para o GitHub.
 
+O link pessoal leva a senha depois do `#` (`/#acesso=SENHA`) e abre o site direto, sem tela de senha. A parte
+depois do `#` não é enviada a nenhum servidor.
+
 ## Como adicionar ou trocar uma IA
 
 1. Coloque o prompt completo em `ias/prompts/<id>.md`.

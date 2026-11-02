@@ -1,4 +1,5 @@
 // Tela de senha e destrancamento dos prompts (que ficam criptografados em ias/trancados/).
+// Pelo link pessoal (com #acesso=...) o site abre direto, sem pedir nada.
 // A senha nunca sai do aparelho: ela gera a chave aqui mesmo e abre os arquivos.
 
 const CHAVE_LEMBRAR = 'central-ias:senha';
@@ -48,6 +49,17 @@ export async function abrirCofre() {
   const lembrar = document.getElementById('cofreLembrar');
   const aviso = document.getElementById('cofreAviso');
   const botao = document.getElementById('cofreEntrar');
+
+  // O link pessoal já traz a chave: .../#acesso=SENHA (a parte depois do # não sai do aparelho).
+  const doLink = new URLSearchParams(location.hash.slice(1)).get('acesso');
+  if (doLink) {
+    const chave = await testar(doLink);
+    if (chave) {
+      try { localStorage.setItem(CHAVE_LEMBRAR, doLink); } catch (e) { /* sem armazenamento */ }
+      tela.hidden = true;
+      return chave;
+    }
+  }
 
   let salva = null;
   try { salva = localStorage.getItem(CHAVE_LEMBRAR); } catch (e) { /* sem armazenamento */ }
