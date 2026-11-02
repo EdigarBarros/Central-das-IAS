@@ -17,7 +17,6 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   let carregada = null;     // IA que está no leitor
   let chipNoLeitor = null;  // { el, dx, dy1, dy2, r }
   let sequencia = 0;        // aumenta a cada chip; cancela animações antigas
-  let vooJanela = null;     // de onde a janela voou até o celular (para voltar ao ejetar)
   const cachePrompts = {};
   const chavePronta = abrirCofre();
 
@@ -58,6 +57,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
 
   // ---------------- estado de espera ----------------
   function telaEmEspera() {
+    tela.querySelectorAll('.voo-rosto').forEach((c) => c.remove());
     janela.getAnimations().forEach((a) => a.cancel());
     janela.classList.remove('voou');
     $('aguardando').hidden = false;
@@ -172,14 +172,10 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     $('porcento').textContent = '0%';
     $('cargaBarra').style.width = '0%';
     const volta = rosto.recolher();
-    if (vooJanela) {
-      janela.animate(
-        [{ transform: `translate(${vooJanela.dx}px, ${vooJanela.dy}px) scale(.12)`, opacity: 0 },
-         { transform: `translate(${vooJanela.dx * 0.3}px, ${vooJanela.dy * 0.3}px) scale(.5)`, opacity: 0.9, offset: 0.5 },
-         { transform: 'translate(0,0) scale(1)', opacity: 1 }],
-        { duration: 750, easing: 'cubic-bezier(.3,0,.2,1)' }
-      );
-    }
+    janela.animate(
+      [{ opacity: 0, transform: 'scale(.94)', filter: 'blur(6px)' }, { opacity: 1, transform: 'scale(1)', filter: 'blur(0px)' }],
+      { duration: 600, easing: 'ease-out' }
+    );
     await Promise.all([saida, volta]);
   }
 
@@ -197,6 +193,67 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     telaEmEspera();
     $('dica').textContent = 'Toque em um chip para carregar a IA';
     document.body.classList.remove('ocupado');
+  }
+
+  // ---------------- voo do rosto até o celular ----------------
+  // Posição de um elemento em coordenadas da tela do monitor (1600 x 900).
+  function naTela(el) {
+    const r = el.getBoundingClientRect();
+    const t = tela.getBoundingClientRect();
+    const k = monitorArea.clientWidth / 1600;
+    return { x: (r.left - t.left) / k, y: (r.top - t.top) / k, w: r.width / k, h: r.height / k };
+  }
+
+  function voarRostoParaCelular(retrato, cor, duracao) {
+    const origem = naTela($('rosto'));
+    const cel = naTela($('corpo3d'));
+    const alvo = corpo.alvoRosto(retrato.height / retrato.width);
+    const escalaFinal = (alvo.w * cel.w) / origem.w;
+    const fimX = cel.x + alvo.cx * cel.w - (origem.w * escalaFinal) / 2 - origem.x;
+    const fimY = cel.y + alvo.cy * cel.h - (origem.h * escalaFinal) / 2 - origem.y;
+
+    // curva: o rosto se destaca (cresce um pouco), sobe num arco e mergulha na tela
+    const passos = 14;
+    const quadros = [];
+    for (let i = 0; i <= passos; i++) {
+      const k = i / passos;
+      const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      const arco = Math.sin(k * Math.PI);
+      const x = fimX * e;
+      const y = fimY * e - arco * 90;
+      const destaque = Math.sin(Math.min(1, k / 0.35) * Math.PI) * 0.08 * (k < 0.35 ? 1 : 0);
+      const esc = 1 + (escalaFinal - 1) * e + destaque;
+      quadros.push({
+        transform: `translate(${x}px, ${y}px) scale(${esc}) rotate(${arco * -4}deg)`,
+        filter: `brightness(${1 + arco * 0.7}) drop-shadow(0 0 ${8 + arco * 26}px ${cor})`,
+        offset: k,
+      });
+    }
+
+    const criar = (opacidade, classe) => {
+      const c = document.createElement('canvas');
+      c.width = retrato.width;
+      c.height = retrato.height;
+      c.getContext('2d').drawImage(retrato, 0, 0);
+      c.className = 'voo-rosto ' + classe;
+      c.style.cssText = `left:${origem.x}px;top:${origem.y}px;width:${origem.w}px;height:${origem.h}px;opacity:${opacidade}`;
+      tela.appendChild(c);
+      return c;
+    };
+    // rastro de luz: cópias mais fracas que seguem o rosto com um pequeno atraso
+    const rastros = [[0.4, 50], [0.24, 100], [0.12, 150]].map(([op, atraso]) => {
+      const c = criar(op, 'rastro');
+      return c.animate(quadros, { duration: duracao, delay: atraso, easing: 'linear', fill: 'forwards' });
+    });
+    const principal = criar(1, '');
+    const anim = principal.animate(quadros, { duration: duracao, easing: 'linear', fill: 'forwards' });
+    // no fim do voo, o rosto voador some rápido (o celular já está mostrando o rosto no mesmo lugar)
+    principal.animate([{ opacity: 1 }, { opacity: 1, offset: 0.9 }, { opacity: 0 }], { duration: duracao + 120, fill: 'forwards' });
+
+    return Promise.all([anim.finished, ...rastros.map((r) => r.finished)])
+      .catch(() => {})
+      .then(() => new Promise((ok) => setTimeout(ok, 140)))
+      .then(() => tela.querySelectorAll('.voo-rosto').forEach((c) => c.remove()));
   }
 
   // ---------------- a sequência do monitor ----------------
@@ -246,28 +303,25 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     await fimDoRosto; if (!ok()) return;
     await esperar(500); if (!ok()) return;
 
-    // a janela encolhe e voa para dentro da tela do celular
+    // o rosto se solta da janela e voa, numa curva, para dentro da tela do celular
     const retrato = rosto.retrato();
-    const jr = janela.getBoundingClientRect();
-    const cel = $('corpo3d').getBoundingClientRect();
-    const escala = monitorArea.clientWidth / 1600;
-    const dx = (cel.left + cel.width * 0.5 - (jr.left + jr.width / 2)) / escala;
-    const dy = (cel.top + cel.height * 0.36 - (jr.top + jr.height / 2)) / escala;
-    vooJanela = { dx, dy };
+    const DURACAO_VOO = 1150;
+    const voo = voarRostoParaCelular(retrato, ia.cor || '#3fd0ff', DURACAO_VOO);
+    rosto.soltar();
     janela.animate(
-      [
-        { transform: 'translate(0,0) scale(1)', opacity: 1 },
-        { transform: `translate(${dx * 0.7}px, ${dy * 0.7}px) scale(.32)`, opacity: 0.9, offset: 0.6 },
-        { transform: `translate(${dx}px, ${dy}px) scale(.12)`, opacity: 0 },
-      ],
-      { duration: 1000, easing: 'cubic-bezier(.6,0,.3,1)', fill: 'forwards' }
+      [{ opacity: 1, transform: 'scale(1)', filter: 'blur(0px)' },
+       { opacity: 0, transform: 'scale(.94)', filter: 'blur(6px)' }],
+      { duration: 550, easing: 'ease-in', fill: 'forwards' }
     );
     $('nomeFantasma').textContent = nomeNovo;
     $('atualizando').classList.add('visivel');
 
-    await esperar(700); if (!ok()) return;
+    // o celular passa a mostrar o rosto um instante antes do voo terminar: a passagem fica contínua
+    await esperar(DURACAO_VOO - 110); if (!ok()) return;
     tela.classList.add('trocando');
-    await corpo.instalar(retrato, ia.nome, ia.cor); if (!ok()) return;
+    const instalacao = corpo.instalar(retrato, ia.nome, ia.cor);
+    await voo;
+    await instalacao; if (!ok()) return;
 
     const placa = $('placaNome');
     placa.classList.remove('apagando');

@@ -408,3 +408,7 @@ body.ocupado .chip { pointer-events: none; }
 .protocolo-rodape .botao:not(.secundario):not(.feito) {
   background: linear-gradient(180deg, var(--cor-ia, #2fc4dc), color-mix(in srgb, var(--cor-ia, #2fc4dc) 75%, #000));
 }
+
+/* o rosto que voa da janela para o celular */
+.voo-rosto { position: absolute; z-index: 20; transform-origin: 0 0; pointer-events: none; will-change: transform, filter, opacity; }
+.voo-rosto.rastro { mix-blend-mode: screen; filter: blur(2px); }

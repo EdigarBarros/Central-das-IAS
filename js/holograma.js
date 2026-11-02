@@ -373,7 +373,7 @@ export async function criarServidor(canvasGL, canvas2D) {
         p.y += Math.sin(k * Math.PI) * 0.25;
         p.x += Math.sin(k * Math.PI * 2) * 0.12;
       } else {
-        e.u = (e.u + e.vel * dt) % 1;
+        e.u = (((e.u + e.vel * dt) % 1) + 1) % 1;
         p = e.curva.getPointAt(e.u);
       }
       e.alfa += (e.alfaAlvo - e.alfa) * Math.min(1, dt * 5);
@@ -535,6 +535,7 @@ export async function criarServidor(canvasGL, canvas2D) {
   let inicio = 0;
   let escolhida = -1;      // gaveta da IA escolhida
   let iaEscolhida = -1;    // índice da IA (e da energia dela)
+  let rostoVisivel = true; // fica falso quando o rosto sai voando para o celular
   let aoTerminar = null;
   let anterior = performance.now();
 
@@ -556,7 +557,7 @@ export async function criarServidor(canvasGL, canvas2D) {
 
   function quadro(agora) {
     requestAnimationFrame(quadro);
-    const dt = Math.min(0.05, (agora - anterior) / 1000);
+    const dt = Math.max(0, Math.min(0.05, (agora - anterior) / 1000));
     anterior = agora;
     const t = agora - inicio;
     const seg = agora / 1000;
@@ -621,7 +622,7 @@ export async function criarServidor(canvasGL, canvas2D) {
       moverEnergias(dt, seg);
       comp.render();
       fumaca(seg, dt, [L / 2, A / 2], 0, 0);
-      desenharRostoPronto(1);
+      if (rostoVisivel) desenharRostoPronto(1);
       return;
     }
 
@@ -661,6 +662,8 @@ export async function criarServidor(canvasGL, canvas2D) {
 
   return {
     retrato() { return rosto; },
+    // o rosto sai da janela (quem leva ele até o celular é o voo, desenhado pela página)
+    soltar() { rostoVisivel = false; },
     vazio() { modo = 'vazio'; },
     mascara() {
       modo = 'mascara';
@@ -687,6 +690,7 @@ export async function criarServidor(canvasGL, canvas2D) {
       });
     },
     async preparar(ia) {
+      rostoVisivel = true;
       corRgb = hexParaRgb(ia.cor || '#3fd0ff');
       pintarSprite();
       const lista = window.IAS || [];
@@ -991,14 +995,37 @@ export async function criarCelular(canvas) {
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(TW / 2, TH * 0.75, 46, agora / 500, agora / 500 + 1.2); ctx.stroke();
     } else if (estadoTela.modo === 'instalando') {
-      // 1) o rosto entra na tela, de cima para baixo
-      const revela = suave(0, 0.9, t);
-      const escala = 1.25 - 0.25 * suave(0, 1.0, t);
-      const alfaRosto = t < 1.0 ? 1 : 0.45 + 0.1 * Math.sin(agora / 90);
-      desenharRosto(ctx, estadoTela.rosto, alfaRosto, revela, escala, 1);
+      // 1) o rosto acabou de chegar voando: aparece inteiro, com clarão e onda de choque
+      const chega = suave(0, 0.12, t);
+      const assenta = suave(0.6, 1.1, t);
+      const tremor = (1 - suave(0, 0.5, t)) * Math.sin(agora / 18) * 5;
+      const alfaRosto = chega * (1 - assenta * 0.5) + assenta * 0.1 * Math.sin(agora / 90);
+      desenharRosto(ctx, estadoTela.rosto, alfaRosto, 1, 1 + 0.05 * (1 - suave(0, 0.45, t)), 0, tremor);
+      if (t < 0.9) {
+        const centro = [TW / 2, TH * 0.33];
+        // clarão na cor da IA
+        ctx.fillStyle = tom(0.3 * (1 - suave(0, 0.3, t)));
+        ctx.fillRect(0, 0, TW, TH);
+        // duas ondas de choque se espalhando
+        for (const atraso of [0, 0.12]) {
+          const k = suave(atraso, atraso + 0.75, t);
+          if (k <= 0 || k >= 1) continue;
+          ctx.strokeStyle = claro(0.85 * (1 - k));
+          ctx.lineWidth = 10 * (1 - k) + 1;
+          ctx.shadowColor = cor; ctx.shadowBlur = 20;
+          ctx.beginPath(); ctx.arc(centro[0], centro[1], 30 + k * TW * 0.85, 0, Math.PI * 2); ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+        // falhas de sinal horizontais
+        if (Math.random() < 0.5 * (1 - suave(0.2, 0.7, t))) {
+          const y = Math.random() * TH, h = 4 + Math.random() * 14;
+          ctx.fillStyle = claro(0.25);
+          ctx.fillRect(0, y, TW, h);
+        }
+      }
       // 2) carregamento
-      if (t > 0.9) {
-        const k = suave(0.9, 2.9, t);
+      if (t > 0.7) {
+        const k = suave(0.7, 2.7, t);
         const cx = TW / 2, cy = TH * 0.71, r = 58;
         ctx.lineWidth = 6;
         ctx.strokeStyle = tom(0.18);
@@ -1111,11 +1138,23 @@ export async function criarCelular(canvas) {
       bordaIA.copy(c).lerp(new THREE.Color('#ffffff'), 0.55);
       const v = ++versao;
       estadoTela = { modo: 'instalando', inicio: performance.now(), rosto, nome: nome.toUpperCase(), rgb: hexParaRgb(corIA) };
-      setTimeout(() => { if (v === versao) troca = { inicio: performance.now(), duracao: 1800 }; }, 900);
+      setTimeout(() => { if (v === versao) troca = { inicio: performance.now(), duracao: 1800 }; }, 700);
       return new Promise((ok) => setTimeout(() => {
         if (v === versao) estadoTela = { ...estadoTela, modo: 'pronto' };
         ok();
-      }, 3100));
+      }, 2900));
+    },
+    // onde o rosto vai ficar na tela do celular (frações do canvas: centro, largura e altura)
+    alvoRosto(aspecto) {
+      celular.updateMatrixWorld(true);
+      const proj = (x, y) => {
+        const v = new THREE.Vector3(x, y, zf).applyMatrix4(celular.matrixWorld).project(camera);
+        return [(v.x + 1) / 2, (1 - v.y) / 2];
+      };
+      const [x0, y0] = proj(-larguraTela / 2, alturaTela / 2);
+      const [x1, y1] = proj(larguraTela / 2, -alturaTela / 2);
+      const largura = (x1 - x0) * 0.8;
+      return { cx: (x0 + x1) / 2, cy: y0 + (y1 - y0) * 0.33, w: largura, h: (largura * L * aspecto) / A };
     },
     // a IA sai do celular; resolve quando terminar
     desinstalar() {
