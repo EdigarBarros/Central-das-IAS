@@ -1,4 +1,5 @@
 import { criarCabeca, criarCorpo } from './holograma.js';
+import { abrirCofre, lerPrompt } from './cofre.js';
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -18,6 +19,7 @@ import { criarCabeca, criarCorpo } from './holograma.js';
   let chipNoLeitor = null;  // { el, dx, dy1, dy2, r }
   let sequencia = 0;        // aumenta a cada chip; cancela animações antigas
   const cachePrompts = {};
+  const chavePronta = abrirCofre();
 
   // "VERÔNICA" -> "V.E.R.Ô.N.I.C.A."
   const sigla = (nome) =>
@@ -257,11 +259,9 @@ import { criarCabeca, criarCorpo } from './holograma.js';
   async function pegarPrompt(ia) {
     if (cachePrompts[ia.id]) return cachePrompts[ia.id];
     try {
-      const r = await fetch(`ias/prompts/${ia.id}.md`, { cache: 'no-store' });
-      if (!r.ok) throw new Error(r.status);
-      cachePrompts[ia.id] = (await r.text()).trim();
+      cachePrompts[ia.id] = (await lerPrompt(await chavePronta, ia.id)).trim();
     } catch (e) {
-      return `Não encontrei o arquivo ias/prompts/${ia.id}.md`;
+      return `Não consegui abrir o prompt de ${ia.nome}. (${e.message})`;
     }
     return cachePrompts[ia.id];
   }

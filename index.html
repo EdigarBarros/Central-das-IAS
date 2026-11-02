@@ -11,6 +11,20 @@
   <link rel="stylesheet" href="css/estilo.css">
 </head>
 <body>
+  <!-- ===================== SENHA ===================== -->
+  <div class="cofre" id="cofre" hidden>
+    <form class="cofre-caixa" id="cofreForm" autocomplete="on">
+      <small>CENTRAL DAS IAs // ACESSO RESTRITO</small>
+      <h1>IDENTIFICAÇÃO</h1>
+      <input type="text" name="username" value="edigar" autocomplete="username" hidden>
+      <label for="cofreSenha">Senha</label>
+      <input id="cofreSenha" type="password" autocomplete="current-password" required>
+      <label class="cofre-lembrar"><input type="checkbox" id="cofreLembrar" checked> Lembrar neste aparelho</label>
+      <button class="botao" id="cofreEntrar" type="submit">Entrar</button>
+      <p class="cofre-aviso" id="cofreAviso" role="status"></p>
+    </form>
+  </div>
+
   <main class="laboratorio">
 
     <!-- ===================== MONITOR ===================== -->

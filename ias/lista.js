@@ -14,6 +14,13 @@
 
 window.IAS = [
   {
+    id: 'adenor',
+    etiqueta: 'ADENOR',
+    nome: 'ADENOR',
+    rosto: null,
+    sistemas: ['RABUGICE', 'LEALDADE', 'EXPERIÊNCIA', 'IRONIA', 'PLANEJAMENTO'],
+  },
+  {
     id: 'veronica',
     etiqueta: 'VERÔNICA',
     nome: 'VERÔNICA',
@@ -21,18 +28,11 @@ window.IAS = [
     sistemas: ['SERENIDADE', 'PERSPICÁCIA', 'HUMOR', 'ESTRATÉGIA', 'SENSIBILIDADE'],
   },
   {
-    id: 'adenor',
-    etiqueta: 'ADENOR',
-    nome: 'ADENOR',
+    id: 'nicole',
+    etiqueta: 'NICOLE',
+    nome: 'NICOLE',
     rosto: null,
-    sistemas: ['EXPERIÊNCIA', 'FRANQUEZA', 'RESPONSABILIDADE', 'RABUGICE', 'LEALDADE'],
-  },
-  {
-    id: 'exemplo',
-    etiqueta: 'NOVA IA',
-    nome: 'NOVA IA',
-    rosto: null,
-    sistemas: ['FLIGHT', 'NAVIGATION', 'VITALS', 'WEAPONS', 'TRACKING'],
+    sistemas: ['MEDO', 'TIMIDEZ', 'INTELIGÊNCIA', 'DELICADEZA', 'CORAGEM'],
   },
 ];
 

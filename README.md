@@ -4,12 +4,19 @@ Site pessoal com a bancada de chips: cada chip guarda a personalidade de uma IA.
 leitor, a tela faz a sequência de carregamento (máscara → faíscas → partículas → rosto → corpo trocando de cor → nome
 novo) e abre o prompt completo com o botão **Copiar**.
 
+## Senha e prompts trancados
+
+O site abre com uma tela de senha. Os prompts ficam criptografados em `ias/trancados/` (AES-GCM, chave derivada da
+senha por PBKDF2), então o repositório pode ser público sem expor nada: o site destranca no próprio aparelho.
+Os prompts abertos (`ias/prompts/*.md`) ficam só no computador e não vão para o GitHub.
+
 ## Como adicionar ou trocar uma IA
 
 1. Coloque o prompt completo em `ias/prompts/<id>.md`.
-2. (Opcional) Coloque o rosto em `ias/rostos/` e aponte o campo `rosto` para ele. Fundo escuro funciona melhor: as
+2. Tranque os prompts: `SENHA='a-senha' node scripts/trancar.mjs` (gera `ias/trancados/<id>.json`).
+3. (Opcional) Coloque o rosto em `ias/rostos/` e aponte o campo `rosto` para ele. Fundo escuro funciona melhor: as
    partes claras viram o holograma.
-3. Acrescente ou edite o bloco correspondente em `ias/lista.js`.
+4. Acrescente ou edite o bloco correspondente em `ias/lista.js`.
 
 ## Rodar no computador
 
@@ -23,9 +30,12 @@ e abrir `http://localhost:8000`.
 
 ## Créditos dos modelos 3D
 
-- `modelos/DamagedHelmet.glb`: "Battle Damaged Sci-fi Helmet - PBR", de theblueturtle_, licença Creative Commons
+Os modelos são carregados direto dos repositórios de origem pelo jsDelivr (veja `MODELOS` em `js/holograma.js`).
+
+
+- DamagedHelmet: "Battle Damaged Sci-fi Helmet - PBR", de theblueturtle_, licença Creative Commons
   Attribution-NonCommercial 4.0 (Khronos glTF Sample Assets).
-- `modelos/BrainStem.glb`: robô BrainStem, © Smith Micro Software (Poser EULA) e ctxwing (CC BY 4.0)
+- BrainStem: robô BrainStem, © Smith Micro Software (Poser EULA) e ctxwing (CC BY 4.0)
   (Khronos glTF Sample Assets).
-- `modelos/LeePerrySmith.glb`: cabeça de Lee Perry-Smith, licença Creative Commons Attribution 3.0, tirada dos
+- LeePerrySmith: cabeça de Lee Perry-Smith, licença Creative Commons Attribution 3.0, tirada dos
   exemplos do three.js.

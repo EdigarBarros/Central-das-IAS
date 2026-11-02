@@ -363,3 +363,34 @@ body.ocupado .chip { pointer-events: none; }
 #rosto3d, #corpo3d { mix-blend-mode: screen; }
 #rosto3d { -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 70%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 70%, transparent 100%); }
 #corpo3d { -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 75%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 75%, transparent 100%); }
+
+/* =============== SENHA =============== */
+.cofre {
+  position: fixed; inset: 0; z-index: 100;
+  display: grid; place-items: center; padding: 16px;
+  background: radial-gradient(ellipse at 50% 30%, #10202e, #05080d 70%);
+  transition: opacity .45s;
+}
+.cofre.saindo { opacity: 0; }
+.cofre-caixa {
+  width: min(380px, 100%);
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 26px 24px 22px;
+  background: linear-gradient(180deg, rgba(18, 32, 52, 0.97), rgba(10, 19, 34, 0.97));
+  border: 1px solid rgba(160, 200, 235, 0.45);
+  box-shadow: 0 0 40px rgba(63, 216, 255, 0.12), 0 30px 60px rgba(0, 0, 0, 0.6);
+  clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 20px 100%, 0 calc(100% - 20px));
+}
+.cofre-caixa small { font-size: 12px; letter-spacing: 2px; color: rgba(200, 225, 245, 0.6); }
+.cofre-caixa h1 { margin: 0 0 8px; font-family: var(--tech); font-size: 30px; letter-spacing: 4px; color: var(--ciano); text-shadow: 0 0 12px rgba(63, 216, 255, 0.45); }
+.cofre-caixa label { font-size: 14px; letter-spacing: 1px; color: rgba(210, 228, 245, 0.8); }
+.cofre-caixa input[type=password] {
+  font: 18px var(--cond); letter-spacing: 2px; color: #e6f2ff;
+  padding: 12px 14px; background: rgba(5, 12, 22, 0.8);
+  border: 1px solid rgba(160, 200, 235, 0.4); outline: none;
+}
+.cofre-caixa input[type=password]:focus { border-color: var(--ciano); box-shadow: 0 0 0 2px rgba(63, 216, 255, 0.25); }
+.cofre-lembrar { display: flex; align-items: center; gap: 8px; }
+.cofre-caixa .botao { margin-top: 6px; }
+.cofre-caixa .botao:disabled { opacity: .6; cursor: wait; }
+.cofre-aviso { min-height: 20px; margin: 0; font-size: 15px; color: #ff9a7a; }

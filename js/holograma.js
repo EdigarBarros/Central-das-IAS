@@ -13,6 +13,13 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
+// Os modelos vêm direto dos repositórios de origem (pelo jsDelivr), assim o site fica leve.
+const MODELOS = {
+  capacete: 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb',
+  cabeca: 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/models/gltf/LeePerrySmith/LeePerrySmith.glb',
+  corpo: 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/BrainStem/glTF-Binary/BrainStem.glb',
+};
+
 const carregador = new GLTFLoader();
 const carregar = (url) => carregador.loadAsync(url);
 
@@ -218,7 +225,7 @@ export async function criarCabeca(canvasGL, canvas2D) {
   camera.lookAt(0, 1.0, 0);
   const comp = compositor(renderer, cena, camera, L, A, 0.6);
 
-  const [gElmo, gRosto] = await Promise.all([carregar('modelos/DamagedHelmet.glb'), carregar('modelos/LeePerrySmith.glb')]);
+  const [gElmo, gRosto] = await Promise.all([carregar(MODELOS.capacete), carregar(MODELOS.cabeca)]);
 
   // --- capacete ---
   const geosElmo = congelar(gElmo.scene);
@@ -461,7 +468,7 @@ export async function criarCorpo(canvas) {
   camera.lookAt(0, 0.9, 0);
   const comp = compositor(renderer, cena, camera, L, A, 0.55);
 
-  const gltf = await carregar('modelos/BrainStem.glb');
+  const gltf = await carregar(MODELOS.corpo);
   const geos = congelar(gltf.scene, gltf.animations[0], 0);
   const caixa = ajustarAltura(geos, 1.82, true);
 
