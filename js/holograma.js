@@ -5,7 +5,7 @@
 // Modelos (créditos no README):
 //   DamagedHelmet  -> a máscara da IA anterior
 //   LeePerrySmith  -> o rosto genérico (quando a IA não tem foto)
-//   BrainStem      -> o corpo
+//   (o celular é montado em código: criarCelular)
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
