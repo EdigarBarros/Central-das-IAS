@@ -360,7 +360,7 @@ body.ocupado .chip { pointer-events: none; }
 }
 
 /* os canvases 3D são desenhados sobre preto: "screen" faz o preto sumir e deixa só a luz */
-#rosto3d, #corpo3d, #rosto { mix-blend-mode: screen; }
+#rosto3d, #corpo3d { mix-blend-mode: screen; }
 #rosto3d { -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 70%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 70%, transparent 100%); }
 #corpo3d { -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 75%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 75%, transparent 100%); }
 

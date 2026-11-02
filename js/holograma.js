@@ -156,17 +156,15 @@ async function fotoHolograma(src, L, A) {
     const x = (i / 4) % L, y = Math.floor(i / 4 / L);
     const borda = suave(0, 30, x) * suave(0, 30, L - x) * suave(0, 24, y) * suave(0, 40, A - y);
     if (temFundoTransparente) {
-      // pré-multiplica pela transparência: o fundo vira preto (que some na mistura "screen")
-      const a = (p[i + 3] / 255) * borda;
-      p[i] *= a; p[i + 1] *= a; p[i + 2] *= a;
+      // mantém a transparência original: traços pretos continuam pretos e cobrem o fundo
+      p[i + 3] *= borda;
     } else {
       const l = (0.3 * p[i] + 0.59 * p[i + 1] + 0.11 * p[i + 2]) / 255;
-      const a = suave(0.1, 0.65, l) * borda;
-      p[i] = (40 + 200 * Math.pow(l, 1.5)) * a;
-      p[i + 1] = (170 + 85 * l) * a;
-      p[i + 2] = (230 + 25 * l) * a;
+      p[i] = 40 + 200 * Math.pow(l, 1.5);
+      p[i + 1] = 170 + 85 * l;
+      p[i + 2] = 230 + 25 * l;
+      p[i + 3] = 255 * suave(0.1, 0.65, l) * borda;
     }
-    p[i + 3] = 255;
   }
   ctx.putImageData(d, 0, 0);
   return c;
@@ -215,8 +213,6 @@ function rostoReserva(ia, L, A) {
   const c = document.createElement('canvas');
   c.width = L; c.height = A;
   const g = c.getContext('2d');
-  g.fillStyle = '#000';
-  g.fillRect(0, 0, L, A);
   g.font = `700 ${L * 0.6}px Rajdhani, sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
@@ -371,27 +367,25 @@ export async function criarServidor(canvasGL, canvas2D) {
     const [cr, cg, cb] = corRgb;
     for (let i = 0, p = 0; i < ruido.length; i++, p += 4) {
       const dif = r - ruido[i];
-      let k = dif <= 0 ? 0 : dif >= 0.14 ? 1 : dif / 0.14;
-      const borda = dif > 0 && dif < 0.05 ? (1 - dif / 0.05) * brilhoBorda : 0;
+      const k = dif <= 0 ? 0 : dif >= 0.14 ? 1 : dif / 0.14;
+      const alfa = src[p + 3] / 255;
+      const borda = dif > 0 && dif < 0.05 ? (1 - dif / 0.05) * brilhoBorda * alfa : 0;
       const forca = (src[p] + src[p + 1] + src[p + 2]) / 765;
-      const b = borda * (0.12 + forca * 0.9);
-      dst[p] = Math.min(255, src[p] * k + (cr + 90) * b);
-      dst[p + 1] = Math.min(255, src[p + 1] * k + (cg + 90) * b);
-      dst[p + 2] = Math.min(255, src[p + 2] * k + (cb + 90) * b);
-      dst[p + 3] = 255;
+      const b = Math.min(1, borda * (0.3 + forca * 1.2));
+      // a borda que está "nascendo" brilha na cor da IA
+      dst[p] = src[p] + ((cr + 120 > 255 ? 255 : cr + 120) - src[p]) * b;
+      dst[p + 1] = src[p + 1] + ((cg + 120 > 255 ? 255 : cg + 120) - src[p + 1]) * b;
+      dst[p + 2] = src[p + 2] + ((cb + 120 > 255 ? 255 : cb + 120) - src[p + 2]) * b;
+      dst[p + 3] = 255 * Math.min(1, alfa * k + b);
     }
     sctx.putImageData(saidaImg, 0, 0);
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
     ctx.drawImage(saidaCanvas, 0, 0);
-    ctx.restore();
   }
 
   function desenharRostoPronto(alfa) {
     if (!rosto || alfa <= 0) return;
     ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = alfa * (0.9 + 0.1 * Math.random());
+    ctx.globalAlpha = alfa * (0.94 + 0.06 * Math.random());
     ctx.drawImage(rosto, 0, 0);
     if (Math.random() < 0.05) {
       const y = Math.random() * A, h = 4 + Math.random() * 18, dx = (Math.random() - 0.5) * 24;
@@ -568,7 +562,7 @@ export async function criarServidor(canvasGL, canvas2D) {
       for (let y = 0; y < A; y += 3) {
         for (let x = 0; x < L; x += 3) {
           const k = (y * L + x) * 4;
-          if ((d[k] + d[k + 1] + d[k + 2]) / 765 > 0.3) alvos.push([x, y]);
+          if (d[k + 3] > 120 && (d[k] + d[k + 1] + d[k + 2]) / 765 > 0.3) alvos.push([x, y]);
         }
       }
       particulas = [];
@@ -800,7 +794,6 @@ export async function criarCelular(canvas) {
     ctx.rect(0, 0, TW, y + h * revela);
     ctx.clip();
     ctx.globalAlpha = alfa;
-    ctx.globalCompositeOperation = 'lighter';
     ctx.drawImage(img, x, y, w, h);
     if (Math.random() < 0.08) {
       const fy = y + Math.random() * h * revela, fh = 6 + Math.random() * 20;
