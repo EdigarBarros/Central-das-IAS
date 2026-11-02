@@ -31,6 +31,17 @@ python3 -m http.server 8000
 
 e abrir `http://localhost:8000`.
 
+## Tamanhos de tela
+
+O layout se ajusta sozinho (`css/estilo.css`, seção "TAMANHOS DE TELA"):
+
+- **Celular em pé**: a tela do monitor troca para uma cena em pé (900 × 1240) e a bancada fica embaixo. Quando a IA
+  começa a carregar, a página rola sozinha até o monitor.
+- **Tablet em pé**: monitor 16:9 na largura toda e a bancada embaixo, com os chips do tamanho que couber.
+- **Deitado** (tablet, notebook, computador): monitor e bancada lado a lado, tudo numa tela só, sem rolar.
+
+Se o aparelho girar com um chip no leitor, o chip acompanha o leitor no lugar novo.
+
 ## O 3D
 
 Tudo é montado em código, sem modelos baixados (`js/holograma.js`):

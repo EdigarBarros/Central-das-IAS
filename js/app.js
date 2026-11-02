@@ -26,8 +26,11 @@ import { abrirCofre, lerPrompt } from './cofre.js';
 
 
   // ---------------- escala do monitor ----------------
+  // A tela é desenhada num tamanho fixo (1600 x 900 deitada, 900 x 1240 em pé no celular, quem decide é o CSS)
+  // e encolhe inteira para caber no monitor.
+  const escala = () => monitorArea.clientWidth / (tela.offsetWidth || 1600);
   function ajustar() {
-    tela.style.transform = `scale(${monitorArea.clientWidth / 1600})`;
+    tela.style.transform = `scale(${escala()})`;
   }
   new ResizeObserver(ajustar).observe(monitorArea);
   ajustar();
@@ -54,6 +57,13 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     b.addEventListener('click', () => aoTocarChip(ia, b));
     chips.appendChild(b);
   });
+
+  // Deitado, os chips ficam em coluna ao lado do monitor: até 3 chips numa coluna só, depois em duas.
+  const bancada = $('bancada');
+  const colunasDeitado = IAS.length <= 3 ? 1 : 2;
+  bancada.style.setProperty('--quantos', IAS.length);
+  bancada.style.setProperty('--colunas-deitado', colunasDeitado);
+  bancada.style.setProperty('--linhas-deitado', Math.ceil(IAS.length / colunasDeitado));
 
   // ---------------- estado de espera ----------------
   function telaEmEspera() {
@@ -119,6 +129,41 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     return anim.finished.then(() => el.classList.remove('no-leitor'));
   }
 
+  // Se a tela gira ou muda de tamanho com um chip no leitor, o leitor muda de lugar: o chip vai junto.
+  function chipParaOLeitor() {
+    if (!chipNoLeitor) return;
+    const { el, giro } = chipNoLeitor;
+    const anims = el.getAnimations();
+    if (anims.some((a) => a.playState === 'running')) {
+      // ainda está entrando: espera terminar e confere de novo
+      Promise.all(anims.map((a) => a.finished)).then(chipParaOLeitor, () => {});
+      return;
+    }
+    anims.forEach((a) => a.cancel());
+    const boca = document.querySelector('.leitor-boca').getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const h = el.offsetHeight;
+    const cy = r.top + r.height / 2;
+    const dx = boca.left + boca.width / 2 - (r.left + r.width / 2);
+    const dy1 = boca.bottom + 14 + h / 2 - cy;
+    const dy2 = boca.bottom - h * 0.6 + h / 2 - cy;
+    el.animate([{ transform: `translate(${dx}px, ${dy2}px) rotate(0deg) scale(1)` }], { duration: 0, fill: 'forwards' });
+    chipNoLeitor = { el, dx, dy1, dy2, giro };
+  }
+  let esperaGiro = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(esperaGiro);
+    esperaGiro = setTimeout(chipParaOLeitor, 120);
+  });
+
+  // No celular a página rola: quando a IA começa a carregar, o monitor entra inteiro na tela.
+  function mostrarMonitor() {
+    const r = monitorArea.getBoundingClientRect();
+    if (r.top >= 0 && r.bottom <= window.innerHeight) return;
+    const suave = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+    monitorArea.scrollIntoView({ behavior: suave ? 'smooth' : 'auto', block: 'nearest' });
+  }
+
   async function aoTocarChip(ia, el) {
     if (chipNoLeitor && chipNoLeitor.el === el) { ejetar(); return; }
     const minha = ++sequencia;
@@ -136,6 +181,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     $('dica').textContent = 'Lendo ' + ia.etiqueta + '...';
     await animarEntrada(el);
     if (minha !== sequencia) return;
+    mostrarMonitor();
     await carregarNaTela(ia, minha);
   }
 
@@ -200,7 +246,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   function naTela(el) {
     const r = el.getBoundingClientRect();
     const t = tela.getBoundingClientRect();
-    const k = monitorArea.clientWidth / 1600;
+    const k = escala();
     return { x: (r.left - t.left) / k, y: (r.top - t.top) / k, w: r.width / k, h: r.height / k };
   }
 

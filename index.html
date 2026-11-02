@@ -34,7 +34,7 @@
           <div class="tela" id="tela">
 
             <!-- moldura de cantoneiras -->
-            <svg class="tela-moldura" viewBox="0 0 1600 900" aria-hidden="true">
+            <svg class="tela-moldura so-deitado" viewBox="0 0 1600 900" aria-hidden="true">
               <path d="M70 38 H560 L572 50 H1028 L1040 38 H1530 L1562 70 V830 L1530 862 H1040 L1028 850 H572 L560 862 H70 L38 830 V70 Z" />
               <path class="fino" d="M38 250 V650 M1562 250 V650" />
               <g class="tracos">
@@ -42,6 +42,15 @@
                 <path d="M1562 120 h8 M1562 135 h8 M1562 290 h8 M1562 305 h8 M1562 470 h8 M1562 590 h8 M1562 605 h8 M1562 760 h8" />
               </g>
               <path class="fino" d="M1180 300 L1150 340 L1180 380 M1180 560 L1150 600 L1180 640" />
+            </svg>
+            <!-- a mesma moldura, em pé (celular) -->
+            <svg class="tela-moldura so-em-pe" viewBox="0 0 900 1240" aria-hidden="true">
+              <path d="M70 38 H330 L342 50 H558 L570 38 H830 L862 70 V1170 L830 1202 H570 L558 1190 H342 L330 1202 H70 L38 1170 V70 Z" />
+              <path class="fino" d="M38 380 V860 M862 380 V860" />
+              <g class="tracos">
+                <path d="M30 120 h8 M30 135 h8 M30 330 h8 M30 345 h8 M30 620 h8 M30 900 h8 M30 915 h8 M30 1120 h8" />
+                <path d="M862 120 h8 M862 135 h8 M862 330 h8 M862 345 h8 M862 620 h8 M862 900 h8 M862 915 h8 M862 1120 h8" />
+              </g>
             </svg>
 
             <!-- barra superior -->
@@ -84,7 +93,7 @@
             </div>
 
             <!-- ligações até a lista de sistemas -->
-            <svg class="ligacoes" id="ligacoes" viewBox="0 0 1600 900" aria-hidden="true">
+            <svg class="ligacoes so-deitado" viewBox="0 0 1600 900" aria-hidden="true">
               <path d="M1010 215 H1150 L1180 190 H1262" />
               <path d="M1040 300 H1170 L1200 285 H1262" class="amarela" />
               <path d="M1000 380 H1190 L1215 368 H1262" />
@@ -92,6 +101,12 @@
               <path d="M1000 540 H1200 L1225 528 H1262" />
               <circle cx="1010" cy="215" r="3" /><circle cx="1040" cy="300" r="3" /><circle cx="1000" cy="380" r="3" />
               <circle cx="1060" cy="470" r="3" /><circle cx="1000" cy="540" r="3" />
+            </svg>
+            <svg class="ligacoes so-em-pe" viewBox="0 0 900 1240" aria-hidden="true">
+              <path d="M600 872 V896 H366 V1160" />
+              <path d="M366 936 H350 M366 1048 H350 M366 1104 H350 M366 1160 H350" />
+              <path d="M600 896 V896 M366 992 H350" class="amarela" />
+              <circle cx="600" cy="872" r="3" /><circle cx="366" cy="896" r="3" />
             </svg>
 
             <!-- lista de sistemas -->
@@ -131,6 +146,7 @@
         <div class="leitor-boca"></div>
       </div>
       <div class="chips" id="chips"></div>
+      <button class="botao flutuante" id="verPrompt" hidden>Ver prompt</button>
       <p class="dica" id="dica">Toque em um chip para carregar a IA</p>
     </section>
   </main>
@@ -152,8 +168,6 @@
       </footer>
     </div>
   </div>
-
-  <button class="botao flutuante" id="verPrompt" hidden>Ver prompt</button>
 
   <script type="importmap">
     {

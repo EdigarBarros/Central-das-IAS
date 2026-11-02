@@ -10,12 +10,14 @@
   --amarelo: #f2c230;
   --cond: 'Barlow Condensed', 'Arial Narrow', sans-serif;
   --tech: 'Rajdhani', 'Barlow Condensed', sans-serif;
+  --borda: clamp(5px, 1.1vmin, 14px); /* grossura da moldura do monitor */
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {
   min-height: 100vh;
+  min-height: 100svh;
   background: radial-gradient(ellipse at 50% 0%, #10202e 0%, var(--fundo) 60%) fixed, var(--fundo);
   color: var(--texto);
   font-family: var(--cond);
@@ -37,8 +39,8 @@ body {
 .monitor-moldura {
   background: linear-gradient(180deg, #16191d, #0b0d10);
   border-radius: 10px;
-  padding: 1.2%;
-  padding-bottom: 2.4%;
+  padding: var(--borda);
+  padding-bottom: calc(var(--borda) * 2);
   box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 .monitor-area {
@@ -308,6 +310,7 @@ body.ocupado .chip { pointer-events: none; }
 .protocolo-janela {
   width: min(760px, 100%);
   max-height: min(86vh, 900px);
+  max-height: min(86dvh, 900px);
   display: flex; flex-direction: column;
   background: linear-gradient(180deg, rgba(18, 32, 52, 0.97), rgba(10, 19, 34, 0.97));
   border: 1px solid rgba(160, 200, 235, 0.45);
@@ -355,9 +358,6 @@ body.ocupado .chip { pointer-events: none; }
   .corpo, .aguardando, .atualizando.visivel { animation: none; }
 }
 
-@media (min-width: 900px) {
-  .laboratorio { padding-top: 28px; }
-}
 
 /* os canvases 3D são desenhados sobre preto: "screen" faz o preto sumir e deixa só a luz */
 #rosto3d, #corpo3d { mix-blend-mode: screen; }
@@ -412,3 +412,94 @@ body.ocupado .chip { pointer-events: none; }
 /* o rosto que voa da janela para o celular */
 .voo-rosto { position: absolute; z-index: 20; transform-origin: 0 0; pointer-events: none; will-change: transform, filter, opacity; }
 .voo-rosto.rastro { mix-blend-mode: screen; filter: blur(2px); }
+
+
+/* =============== TAMANHOS DE TELA =============== */
+/* Três arranjos:
+   - celular em pé: a tela do monitor vira uma cena em pé (900 x 1240) e a bancada fica embaixo;
+   - tablet em pé: monitor 16:9 na largura toda e a bancada embaixo, ocupando o resto da altura;
+   - qualquer tela deitada (tablet deitado, notebook, computador): monitor e bancada lado a lado, tudo numa tela só. */
+.so-em-pe { display: none; }
+
+/* ---------- celular em pé ---------- */
+@media (orientation: portrait) and (max-width: 699px) {
+  .laboratorio { padding: max(10px, env(safe-area-inset-top)) 10px max(24px, env(safe-area-inset-bottom)); gap: 12px; }
+  .monitor-area { aspect-ratio: 900 / 1240; }
+  .tela { width: 900px; height: 1240px; }
+  .so-deitado { display: none; }
+  .so-em-pe { display: block; }
+
+  .barra-topo { font-size: 15px; }
+  .topo-meio { gap: 22px; }
+
+  .coluna-esq { left: 70px; top: 104px; width: 760px; height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+  .nome-fantasma { font-size: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .atualizando { margin-top: 0; font-size: 20px; }
+  .linhas-fantasma, .painel-fantasma { display: none; }
+  .vidro-fundo { left: 48px; top: 196px; width: 470px; height: 640px; }
+
+  .janela { left: 70px; top: 170px; }
+  .corpo { left: 420px; top: 120px; }
+
+  .sistemas { left: 60px; top: 912px; width: 290px; }
+  .sistemas li { height: 48px; margin-bottom: 8px; padding: 4px 12px; }
+  .sistemas small { font-size: 10px; }
+  .sistemas b { font-size: 19px; line-height: 22px; }
+  .sistemas i { bottom: 5px; }
+
+  .placa-nome { left: 380px; top: 920px; }
+  .icones-base { left: 471px; top: 1100px; }
+
+  .bancada { --chip-l: clamp(60px, 18vw, 100px); padding: 14px 10px 20px; }
+  .chips { margin-top: 24px; gap: 18px 14px; }
+  .dica { margin-top: 16px; font-size: 13px; letter-spacing: 1.5px; }
+}
+
+/* ---------- tablet em pé ---------- */
+@media (orientation: portrait) and (min-width: 700px) {
+  .laboratorio { max-width: 1000px; padding: 20px 20px 28px; gap: 18px; min-height: 100svh; justify-content: center; }
+  /* os chips crescem até preencher o espaço que sobra embaixo do monitor */
+  .bancada { --chip-l: clamp(64px, calc((100svh - min(100vw, 1000px) * 0.5625 - 210px) / 3), 120px); }
+}
+
+/* ---------- deitado: tablet, notebook e computador ---------- */
+@media (orientation: landscape) {
+  .laboratorio {
+    --pad-x: clamp(10px, 2vw, 32px);
+    --pad-y: clamp(8px, 2.5svh, 28px);
+    max-width: none;
+    min-height: 100svh;
+    padding: max(var(--pad-y), env(safe-area-inset-top)) max(var(--pad-x), env(safe-area-inset-right)) max(var(--pad-y), env(safe-area-inset-bottom)) max(var(--pad-x), env(safe-area-inset-left));
+    display: grid;
+    /* o monitor cresce até ocupar a altura toda; a bancada fica do lado */
+    grid-template-columns: minmax(0, calc((100svh - var(--pad-y) * 2 - var(--borda) * 3) * 16 / 9 + var(--borda) * 2)) auto;
+    justify-content: center;
+    align-content: center;
+    align-items: center;
+    gap: clamp(12px, 1.6vw, 28px);
+  }
+  .bancada {
+    /* o tamanho do chip sai da altura da tela e de quantas fileiras de chips existem */
+    --colunas: var(--colunas-deitado, 1);
+    --linhas: var(--linhas-deitado, 3);
+    --chip-l: clamp(44px, calc((100svh - 210px) / (1.2 + var(--linhas) * 1.95)), 120px);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px clamp(12px, 1.2vw, 20px) 18px;
+    max-width: 34vw;
+  }
+  .chips {
+    display: grid;
+    grid-template-columns: repeat(var(--colunas), var(--chip-l));
+    justify-content: center;
+    gap: calc(var(--chip-l) * 0.2) calc(var(--chip-l) * 0.22);
+    margin-top: calc(var(--chip-l) * 0.25);
+  }
+  .dica { max-width: max(calc(var(--chip-l) * 1.9), calc(var(--colunas) * var(--chip-l) * 1.3)); text-wrap: balance; margin-top: 14px; font-size: 13px; letter-spacing: 1.5px; line-height: 1.35; }
+  /* o botão "Ver prompt" fica dentro da bancada, no lugar da dica */
+  .bancada .flutuante { position: static; margin-top: 14px; font-size: 15px; padding: 10px 16px; box-shadow: 0 0 16px rgba(63, 216, 255, 0.3); }
+  .bancada .flutuante:not([hidden]) + .dica { display: none; }
+}
+/* deitado e baixinho (celular deitado): todos os chips numa fileira */
+@media (orientation: landscape) and (max-height: 500px) {
+  .bancada { --chip-l: clamp(40px, calc((100svh - 170px) / 3.2), 90px); --colunas: var(--quantos, 3); --linhas: 1; padding-top: 10px; padding-bottom: 12px; }
+}
