@@ -1,100 +1,179 @@
-// Partes em 3D da tela: a cabeça (máscara -> partículas -> rosto) e o corpo em holograma.
-// Modelos: Xbot (Mixamo) e cabeça de Lee Perry-Smith (CC BY 3.0), ambos dos exemplos do three.js.
+// Partes em 3D da tela, desenhadas como holograma: linhas finas acesas, miolo quase transparente e brilho
+// espalhado (bloom). O canvas é desenhado sobre fundo preto e entra na página com "mix-blend-mode: screen",
+// então o preto some e só a luz aparece por cima da interface.
+//
+// Modelos (créditos no README):
+//   DamagedHelmet  -> a máscara da IA anterior
+//   LeePerrySmith  -> o rosto genérico (quando a IA não tem foto)
+//   BrainStem      -> o corpo
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 const carregador = new GLTFLoader();
-const carregar = (url) => new Promise((ok, erro) => carregador.load(url, ok, undefined, erro));
+const carregar = (url) => carregador.loadAsync(url);
 
 const suave = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
 
-const LARANJA = new THREE.Color('#ff5a1f');
-const DOURADO = new THREE.Color('#ffc46b');
-const CIANO = new THREE.Color('#2fc8ff');
-const CIANO_CLARO = new THREE.Color('#bff4ff');
+// ---------- utilidades de geometria ----------
 
-// ============================================================
-// CABEÇA
-// ============================================================
-const vertCabeca = /* glsl */ `
-  varying vec3 vN;
-  varying vec3 vV;
-  varying vec3 vP;
-  void main() {
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    vN = normalize(normalMatrix * normal);
-    vV = normalize(-mv.xyz);
-    vP = position;
-    gl_Position = projectionMatrix * mv;
-  }`;
+// Congela o modelo (inclusive personagens com esqueleto) numa pose e devolve geometrias soltas, no espaço do mundo.
+function congelar(raiz, animacao, instante) {
+  if (animacao) {
+    const mixer = new THREE.AnimationMixer(raiz);
+    mixer.clipAction(animacao).play();
+    mixer.update(instante || 0);
+  }
+  raiz.updateMatrixWorld(true);
+  const saida = [];
+  const v = new THREE.Vector3();
+  raiz.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.isSkinnedMesh) o.skeleton.update();
+    const pos = o.geometry.attributes.position;
+    const arr = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      if (o.isSkinnedMesh) o.applyBoneTransform(i, v);
+      v.applyMatrix4(o.matrixWorld);
+      arr[i * 3] = v.x; arr[i * 3 + 1] = v.y; arr[i * 3 + 2] = v.z;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+    if (o.geometry.index) g.setIndex(o.geometry.index.clone());
+    g.computeVertexNormals();
+    saida.push(g);
+  });
+  return saida;
+}
 
-// modo 0 = máscara vermelha com borda ciano; modo 1 = holograma do rosto
-const fragCabeca = /* glsl */ `
-  uniform float uModo;
-  uniform float uAlfa;
-  uniform float uTempo;
-  uniform float uOlhos;
-  uniform float uCorteY;
-  varying vec3 vN;
-  varying vec3 vV;
-  varying vec3 vP;
-  void main() {
-    vec3 n = normalize(vN);
-    float fres = pow(1.0 - abs(dot(n, normalize(vV))), 2.2);
-    vec3 luz = normalize(vec3(0.15, 0.55, 1.0));
-    float dif = max(dot(n, luz), 0.0);
+// Centraliza e escala um conjunto de geometrias para caber numa altura.
+function ajustarAltura(geos, altura, pe) {
+  const caixa = new THREE.Box3();
+  geos.forEach((g) => { g.computeBoundingBox(); caixa.union(g.boundingBox); });
+  const tam = caixa.getSize(new THREE.Vector3());
+  const centro = caixa.getCenter(new THREE.Vector3());
+  const k = altura / tam.y;
+  const m = new THREE.Matrix4().makeScale(k, k, k).multiply(
+    new THREE.Matrix4().makeTranslation(-centro.x, pe ? -caixa.min.y : -centro.y, -centro.z)
+  );
+  geos.forEach((g) => { g.applyMatrix4(m); g.computeBoundingBox(); });
+  return new THREE.Box3().copy(caixa).applyMatrix4(m);
+}
 
-    // máscara: vermelho escuro, contorno ciano, olhos acesos
-    vec3 mascara = mix(vec3(0.32, 0.03, 0.03), vec3(0.55, 0.08, 0.06), dif);
-    mascara = mix(mascara, vec3(0.35, 0.9, 1.0), smoothstep(0.35, 0.95, fres));
-    float aMascara = 0.82 + 0.18 * fres;
+function compositor(renderer, cena, camera, L, A, forca) {
+  const c = new EffectComposer(renderer);
+  c.setPixelRatio(renderer.getPixelRatio());
+  c.setSize(L, A);
+  c.addPass(new RenderPass(cena, camera));
+  c.addPass(new UnrealBloomPass(new THREE.Vector2(L, A), forca, 0.3, 0.12));
+  return c;
+}
 
-    // holograma: rosto escuro com luz forte nos relevos (testa, sobrancelhas, nariz, boca)
-    float dif2 = max(dot(n, normalize(vec3(0.0, 0.05, 1.0))), 0.0);
-    float brilho = pow(dif2, 5.0) * 0.95 + fres * 0.3;
-    vec3 holo = mix(vec3(0.05, 0.5, 0.75), vec3(0.85, 0.98, 1.0), smoothstep(0.35, 1.0, brilho)) * brilho;
-    float linha = 0.78 + 0.22 * step(0.5, fract(gl_FragCoord.y / 3.0));
-    float aHolo = clamp(brilho, 0.0, 1.0) * linha * (0.92 + 0.08 * sin(uTempo * 40.0));
+function criarRenderer(canvas, L, A) {
+  const r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  r.setSize(L, A, false);
+  r.setClearColor(0x000000, 1);
+  return r;
+}
 
-    vec3 cor = mix(mascara, holo, uModo);
-    float pescoco = smoothstep(uCorteY - 0.9, uCorteY + 0.3, vP.y);
-    float a = mix(aMascara, aHolo, uModo) * uAlfa * pescoco;
-    gl_FragColor = vec4(cor, a);
-  }`;
+// ---------- materiais de holograma ----------
 
-const vertPontos = /* glsl */ `
-  attribute vec3 aDir;
-  attribute float aRand;
-  uniform float uEspalhar;
-  uniform float uTempo;
-  uniform float uTam;
-  uniform float uCorteY;
-  varying float vBrilho;
-  void main() {
-    if (position.y < uCorteY - 0.6) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-    float e = uEspalhar * (0.6 + aRand * 0.8);
-    vec3 p = position + aDir * e * 3.2;
-    p += vec3(sin(uTempo * 2.0 + aRand * 20.0), cos(uTempo * 1.7 + aRand * 13.0), sin(uTempo * 1.3 + aRand * 7.0)) * e * 0.6;
-    vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    gl_PointSize = uTam * (0.6 + aRand) * (10.0 / -mv.z);
-    vBrilho = 0.45 + 0.55 * aRand;
-    gl_Position = projectionMatrix * mv;
-  }`;
+// Linhas: cor A embaixo do "corte", cor B acima dele (é assim que a armadura troca de cor de cima para baixo).
+function materialLinhas(u) {
+  return new THREE.ShaderMaterial({
+    uniforms: u,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying float vY;
+      void main() {
+        vY = (modelMatrix * vec4(position, 1.0)).y;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uLinhaA;
+      uniform vec3 uLinhaB;
+      uniform float uCorte;
+      uniform float uAlfa;
+      uniform float uOpacidade;
+      varying float vY;
+      void main() {
+        float novo = smoothstep(uCorte - 0.02, uCorte + 0.02, vY);
+        vec3 c = mix(uLinhaA, uLinhaB, novo);
+        float faixa = smoothstep(0.035, 0.0, abs(vY - uCorte));
+        c += vec3(0.9, 1.0, 1.0) * faixa * 2.0;
+        gl_FragColor = vec4(c, uOpacidade * uAlfa);
+      }`,
+  });
+}
 
-const fragPontos = /* glsl */ `
-  uniform float uAlfa;
-  varying float vBrilho;
-  void main() {
-    vec2 c = gl_PointCoord - 0.5;
-    float d = 1.0 - smoothstep(0.15, 0.5, length(c));
-    gl_FragColor = vec4(vec3(0.65, 0.93, 1.0) * vBrilho, d * uAlfa * vBrilho);
-  }`;
+// Miolo: quase invisível, acende só nas bordas (fresnel).
+function materialMiolo(u) {
+  return new THREE.ShaderMaterial({
+    uniforms: u,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying vec3 vN;
+      varying vec3 vV;
+      varying float vY;
+      void main() {
+        vec4 mundo = modelMatrix * vec4(position, 1.0);
+        vY = mundo.y;
+        vec4 mv = viewMatrix * mundo;
+        vN = normalize(normalMatrix * normal);
+        vV = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uMioloA;
+      uniform vec3 uMioloB;
+      uniform vec3 uBorda;
+      uniform float uCorte;
+      uniform float uAlfa;
+      uniform float uBordaForca;
+      varying vec3 vN;
+      varying vec3 vV;
+      varying float vY;
+      void main() {
+        float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.4);
+        float novo = smoothstep(uCorte - 0.02, uCorte + 0.02, vY);
+        vec3 c = mix(uMioloA, uMioloB, novo) * (0.025 + 0.32 * f);
+        c += uBorda * pow(f, 4.0) * uBordaForca;
+        float linha = 0.8 + 0.2 * step(0.5, fract(gl_FragCoord.y / 3.0));
+        gl_FragColor = vec4(c * uAlfa * linha, 1.0);
+      }`,
+  });
+}
 
-// Foto da IA transformada em holograma (2D), quando a IA tem imagem própria.
+function texturaBrilho() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const r = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  r.addColorStop(0, 'rgba(255,255,255,1)');
+  r.addColorStop(0.16, 'rgba(255,255,255,0.95)');
+  r.addColorStop(0.26, 'rgba(255,255,255,0.15)');
+  r.addColorStop(0.38, 'rgba(255,255,255,0.7)');
+  r.addColorStop(0.46, 'rgba(255,255,255,0.05)');
+  r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+
+// ---------- foto da IA em holograma (quando a IA tem imagem) ----------
 function carregarImagem(src) {
   return new Promise((ok, erro) => {
     const img = new Image();
@@ -116,68 +195,134 @@ async function fotoHolograma(src, L, A) {
     const l = (0.3 * p[i] + 0.59 * p[i + 1] + 0.11 * p[i + 2]) / 255;
     const x = (i / 4) % L, y = Math.floor(i / 4 / L);
     const borda = suave(0, 40, x) * suave(0, 40, L - x) * suave(0, 30, y) * suave(0, 50, A - y);
-    p[i] = 40 + 200 * Math.pow(l, 1.5);
-    p[i + 1] = 170 + 85 * l;
-    p[i + 2] = 230 + 25 * l;
-    p[i + 3] = 255 * suave(0.1, 0.65, l) * borda;
+    const a = suave(0.1, 0.65, l) * borda;
+    p[i] = (40 + 200 * Math.pow(l, 1.5)) * a;
+    p[i + 1] = (170 + 85 * l) * a;
+    p[i + 2] = (230 + 25 * l) * a;
+    p[i + 3] = 255;
   }
   ctx.putImageData(d, 0, 0);
   return c;
 }
 
+// ============================================================
+// CABEÇA: capacete (IA anterior) -> partículas -> rosto (IA nova)
+// ============================================================
 export async function criarCabeca(canvasGL, canvas2D) {
   const L = canvas2D.width, A = canvas2D.height;
   const ctx = canvas2D.getContext('2d');
-  const renderer = new THREE.WebGLRenderer({ canvas: canvasGL, alpha: true, antialias: true });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.setSize(L, A, false);
+  const renderer = criarRenderer(canvasGL, L, A);
   const cena = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, L / A, 0.1, 100);
-  camera.position.set(0, 1.0, 14.5);
+  camera.position.set(0, 1.0, 15);
   camera.lookAt(0, 1.0, 0);
+  const comp = compositor(renderer, cena, camera, L, A, 0.6);
 
-  const gltf = await carregar('modelos/LeePerrySmith.glb');
-  let geo = null;
-  gltf.scene.traverse((o) => { if (o.isMesh && !geo) geo = o.geometry; });
-  geo = geo.clone();
-  geo.computeVertexNormals();
+  const [gElmo, gRosto] = await Promise.all([carregar('modelos/DamagedHelmet.glb'), carregar('modelos/LeePerrySmith.glb')]);
 
-  const uniCabeca = {
-    uModo: { value: 0 }, uAlfa: { value: 1 }, uTempo: { value: 0 }, uOlhos: { value: 1 }, uCorteY: { value: -1.2 },
+  // --- capacete ---
+  const geosElmo = congelar(gElmo.scene);
+  ajustarAltura(geosElmo, 5.4, false);
+  geosElmo.forEach((g) => g.translate(0, 1.2, 0));
+  const uniElmoLinhas = {
+    uLinhaA: { value: new THREE.Color('#ff5a3c') }, uLinhaB: { value: new THREE.Color('#ff5a3c') },
+    uCorte: { value: 99 }, uAlfa: { value: 1 }, uOpacidade: { value: 0.26 },
   };
-  const malha = new THREE.Mesh(geo, new THREE.ShaderMaterial({
-    vertexShader: vertCabeca, fragmentShader: fragCabeca, uniforms: uniCabeca,
-    transparent: true, depthWrite: true,
+  const uniElmoMiolo = {
+    uMioloA: { value: new THREE.Color('#ff2a1a') }, uMioloB: { value: new THREE.Color('#ff2a1a') },
+    uBorda: { value: new THREE.Color('#5fe4ff') }, uCorte: { value: 99 }, uAlfa: { value: 1 }, uBordaForca: { value: 0.9 },
+  };
+  const elmo = new THREE.Group();
+  geosElmo.forEach((g) => {
+    elmo.add(new THREE.Mesh(g, materialMiolo(uniElmoMiolo)));
+    elmo.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 28), materialLinhas(uniElmoLinhas)));
+  });
+
+  // --- rosto (cabeça humana, cortada no pescoço) ---
+  let geoRosto = null;
+  gRosto.scene.traverse((o) => { if (o.isMesh && !geoRosto) geoRosto = o.geometry; });
+  geoRosto = geoRosto.clone();
+  geoRosto.computeVertexNormals();
+  const CORTE_PESCOCO = -1.3;
+  const uniRosto = { uAlfa: { value: 0 }, uTempo: { value: 0 }, uPescoco: { value: CORTE_PESCOCO } };
+  const rosto = new THREE.Mesh(geoRosto, new THREE.ShaderMaterial({
+    uniforms: uniRosto,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vP = position;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float uAlfa; uniform float uTempo; uniform float uPescoco;
+      varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main() {
+        vec3 n = normalize(vN);
+        float f = pow(1.0 - abs(dot(n, normalize(vV))), 2.2);
+        float luz = pow(max(dot(n, normalize(vec3(0.0, 0.1, 1.0))), 0.0), 6.0);
+        float b = luz * 0.55 + f * 0.3;
+        vec3 c = mix(vec3(0.05, 0.45, 0.8), vec3(0.8, 0.97, 1.0), smoothstep(0.3, 0.9, b)) * b;
+        float pesc = smoothstep(uPescoco - 0.6, uPescoco + 0.5, vP.y);
+        float linha = 0.7 + 0.3 * step(0.5, fract(gl_FragCoord.y / 3.0));
+        gl_FragColor = vec4(c * uAlfa * pesc * linha * (0.93 + 0.07 * sin(uTempo * 37.0)), 1.0);
+      }`,
   }));
 
-  // nuvem de partículas com os mesmos vértices da cabeça
-  const n = geo.attributes.position.count;
-  const dir = new Float32Array(n * 3), rand = new Float32Array(n);
-  const pos = geo.attributes.position;
-  for (let i = 0; i < n; i++) {
-    const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)).normalize();
-    v.add(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(1.4)).normalize();
-    dir.set([v.x, v.y, v.z], i * 3);
-    rand[i] = Math.random();
+  // --- partículas: saem dos vértices do capacete e vão para os do rosto ---
+  const posR = geoRosto.attributes.position;
+  const fins = [];
+  for (let i = 0; i < posR.count; i++) if (posR.getY(i) > CORTE_PESCOCO - 0.3) fins.push(i);
+  const posE = [];
+  geosElmo.forEach((g) => { const p = g.attributes.position; for (let i = 0; i < p.count; i++) posE.push(p.getX(i), p.getY(i), p.getZ(i)); });
+  const n = fins.length;
+  const ini = new Float32Array(n * 3), fim = new Float32Array(n * 3), rnd = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    const i = fins[k];
+    fim.set([posR.getX(i), posR.getY(i), posR.getZ(i)], k * 3);
+    const j = Math.floor(Math.random() * (posE.length / 3));
+    ini.set([posE[j * 3], posE[j * 3 + 1], posE[j * 3 + 2]], k * 3);
+    rnd[k] = Math.random();
   }
-  const geoPontos = new THREE.BufferGeometry();
-  geoPontos.setAttribute('position', pos);
-  geoPontos.setAttribute('aDir', new THREE.BufferAttribute(dir, 3));
-  geoPontos.setAttribute('aRand', new THREE.BufferAttribute(rand, 1));
-  const uniPontos = { uEspalhar: { value: 0 }, uTempo: { value: 0 }, uAlfa: { value: 0 }, uTam: { value: 2.2 * renderer.getPixelRatio() }, uCorteY: uniCabeca.uCorteY };
-  const pontos = new THREE.Points(geoPontos, new THREE.ShaderMaterial({
-    vertexShader: vertPontos, fragmentShader: fragPontos, uniforms: uniPontos,
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  const geoP = new THREE.BufferGeometry();
+  geoP.setAttribute('position', new THREE.BufferAttribute(fim.slice(), 3));
+  geoP.setAttribute('aIni', new THREE.BufferAttribute(ini, 3));
+  geoP.setAttribute('aFim', new THREE.BufferAttribute(fim, 3));
+  geoP.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 1));
+  const uniP = { uProg: { value: 0 }, uAlfa: { value: 0 }, uTempo: { value: 0 }, uTam: { value: 2.0 * renderer.getPixelRatio() } };
+  const particulas = new THREE.Points(geoP, new THREE.ShaderMaterial({
+    uniforms: uniP,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      attribute vec3 aIni; attribute vec3 aFim; attribute float aRnd;
+      uniform float uProg; uniform float uTempo; uniform float uTam;
+      varying float vB;
+      void main() {
+        float k = clamp((uProg - aRnd * 0.45) / 0.55, 0.0, 1.0);
+        k = k * k * (3.0 - 2.0 * k);
+        vec3 p = mix(aIni, aFim, k);
+        float voo = sin(k * 3.14159);
+        p += vec3(sin(aRnd * 40.0 + uTempo * 2.0), cos(aRnd * 31.0 + uTempo * 1.6), sin(aRnd * 17.0)) * voo * 1.6;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = uTam * (0.6 + aRnd) * (14.0 / -mv.z);
+        vB = 0.4 + 0.6 * aRnd;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float uAlfa; varying float vB;
+      void main() {
+        float d = 1.0 - smoothstep(0.1, 0.5, length(gl_PointCoord - 0.5));
+        gl_FragColor = vec4(vec3(0.6, 0.92, 1.0) * vB * d * uAlfa, 1.0);
+      }`,
   }));
 
-  const uniArame = { uAlfa: { value: 1 }, uCorteY: uniCabeca.uCorteY };
-  const arame = new THREE.Mesh(geo, new THREE.ShaderMaterial({
-    uniforms: uniArame, wireframe: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    vertexShader: 'varying float vY; void main(){ vY = position.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: 'uniform float uAlfa; uniform float uCorteY; varying float vY; void main(){ float p = smoothstep(uCorteY - 0.9, uCorteY + 0.3, vY); gl_FragColor = vec4(vec3(0.25,0.75,0.95), 0.10 * uAlfa * p); }',
-  }));
   const grupo = new THREE.Group();
-  grupo.add(malha, arame, pontos);
+  grupo.add(elmo, rosto, particulas);
   cena.add(grupo);
 
   let modo = 'vazio';
@@ -196,7 +341,7 @@ export async function criarCabeca(canvasGL, canvas2D) {
     for (let k = 0; k < qtd; k++) {
       const lado = Math.random() < 0.5 ? -1 : 1;
       let x = L / 2 + lado * (30 + Math.random() * 40);
-      let y = A * 0.42 + (Math.random() - 0.5) * 40;
+      let y = A * 0.4 + (Math.random() - 0.5) * 40;
       ctx.lineWidth = 0.6 + Math.random() * 1.6;
       ctx.beginPath();
       ctx.moveTo(x, y);
@@ -208,8 +353,8 @@ export async function criarCabeca(canvasGL, canvas2D) {
       }
       ctx.stroke();
     }
-    const g = ctx.createRadialGradient(L / 2, A * 0.42, 10, L / 2, A * 0.42, 180);
-    g.addColorStop(0, `rgba(120, 230, 255, ${0.35 * intensidade})`);
+    const g = ctx.createRadialGradient(L / 2, A * 0.4, 10, L / 2, A * 0.4, 180);
+    g.addColorStop(0, `rgba(120, 230, 255, ${0.3 * intensidade})`);
     g.addColorStop(1, 'rgba(120, 230, 255, 0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, L, A);
@@ -219,56 +364,55 @@ export async function criarCabeca(canvasGL, canvas2D) {
   function desenharFoto(alfa) {
     if (!foto || alfa <= 0) return;
     ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = alfa * (0.9 + 0.1 * Math.random());
     ctx.drawImage(foto, 0, 0);
     if (Math.random() < 0.05) {
       const y = Math.random() * A, h = 4 + Math.random() * 18, dx = (Math.random() - 0.5) * 24;
       ctx.drawImage(foto, 0, y, L, h, dx, y, L, h);
     }
-    ctx.fillStyle = 'rgba(4, 10, 20, 0.28)';
-    for (let yy = 0; yy < A; yy += 3) ctx.fillRect(0, yy, L, 1);
     ctx.restore();
+  }
+
+  function estado(alfaElmo, prog, alfaPart, alfaRosto) {
+    uniElmoLinhas.uAlfa.value = alfaElmo;
+    uniElmoMiolo.uAlfa.value = alfaElmo;
+    elmo.visible = alfaElmo > 0.005;
+    uniP.uProg.value = prog;
+    uniP.uAlfa.value = alfaPart;
+    particulas.visible = alfaPart > 0.005;
+    uniRosto.uAlfa.value = foto ? 0 : alfaRosto;
+    rosto.visible = !foto && alfaRosto > 0.005;
   }
 
   function quadro(agora) {
     requestAnimationFrame(quadro);
     const t = agora - inicio;
     const seg = agora / 1000;
-    uniCabeca.uTempo.value = seg;
-    uniPontos.uTempo.value = seg;
+    uniRosto.uTempo.value = seg;
+    uniP.uTempo.value = seg;
     ctx.clearRect(0, 0, L, A);
     canvasGL.style.visibility = modo === 'vazio' ? 'hidden' : 'visible';
+    if (modo === 'vazio') return;
 
     if (modo === 'mascara') {
-      grupo.rotation.set(0.05, 0.55 + Math.sin(seg * 0.7) * 0.35, 0);
-      uniCabeca.uModo.value = 0; uniCabeca.uAlfa.value = 1; uniPontos.uAlfa.value = 0;
-      uniCabeca.uOlhos.value = 0.75 + 0.25 * Math.sin(seg * 3);
-      malha.visible = true; arame.visible = true; uniArame.uAlfa.value = 1;
+      grupo.position.x = 0;
+      grupo.rotation.set(0.08, 0.6 + Math.sin(seg * 0.6) * 0.35, 0);
+      estado(1, 0, 0, 0);
     } else if (modo === 'transformando') {
-      // 1) máscara girando até ficar de frente, tremendo
-      const giro = 0.55 * (1 - suave(600, 2600, t));
-      grupo.rotation.set(0.05 * (1 - suave(600, 2600, t)), giro + Math.sin(t / 380) * 0.25 * (1 - suave(400, 1600, t)), 0);
-      const tremor = suave(900, 1500, t) * (1 - suave(1900, 2200, t));
-      grupo.position.x = (Math.random() - 0.5) * 0.12 * tremor;
-      // 2) a máscara some e vira partículas, que se espalham e voltam formando o rosto
-      const alfaMascara = 1 - suave(1500, 2000, t);
-      const espalhar = suave(1700, 2400, t) * (1 - suave(2500, 3400, t));
-      uniPontos.uEspalhar.value = espalhar;
-      uniPontos.uAlfa.value = suave(1400, 1800, t) * (1 - suave(3300, 4000, t));
-      // 3) o rosto em holograma aparece (3D ou a foto da IA)
-      const alfaRosto = suave(3000, 3800, t);
-      arame.visible = alfaMascara > 0.01; uniArame.uAlfa.value = alfaMascara;
-      if (alfaMascara > 0.01) {
-        uniCabeca.uModo.value = 0; uniCabeca.uAlfa.value = alfaMascara; uniCabeca.uOlhos.value = 1 + tremor;
-        malha.visible = true;
-      } else if (!foto) {
-        uniCabeca.uModo.value = 1; uniCabeca.uAlfa.value = alfaRosto;
-        malha.visible = alfaRosto > 0.01;
-      } else {
-        malha.visible = false;
-      }
-      renderer.render(cena, camera);
-      faiscas(suave(700, 1400, t) * (1 - suave(2300, 2900, t)));
+      // capacete gira até ficar de frente e treme
+      const vira = suave(300, 1500, t);
+      grupo.rotation.set(0.08 * (1 - vira), (0.6 + Math.sin(t / 420) * 0.25) * (1 - vira), 0);
+      const tremor = suave(800, 1400, t) * (1 - suave(1700, 2000, t));
+      grupo.position.x = (Math.random() - 0.5) * 0.18 * tremor;
+      // vira partículas, que voam e montam o rosto
+      const alfaElmo = 1 - suave(1450, 1900, t);
+      const prog = suave(1500, 3500, t);
+      const alfaPart = suave(1400, 1700, t) * (1 - 0.65 * suave(3300, 4000, t));
+      const alfaRosto = suave(3000, 3900, t);
+      estado(alfaElmo, prog, alfaPart, alfaRosto);
+      comp.render();
+      faiscas(suave(700, 1300, t) * (1 - suave(2100, 2700, t)));
       desenharFoto(alfaRosto);
       if (t > 4000) {
         modo = 'rosto';
@@ -277,26 +421,18 @@ export async function criarCabeca(canvasGL, canvas2D) {
       }
       return;
     } else if (modo === 'rosto') {
-      grupo.rotation.set(0, Math.sin(seg * 0.5) * 0.12, 0);
-      uniPontos.uAlfa.value = 0;
-      arame.visible = false;
-      if (foto) {
-        malha.visible = false;
-        renderer.render(cena, camera);
-        desenharFoto(1);
-        return;
-      }
-      malha.visible = true;
-      uniCabeca.uModo.value = 1; uniCabeca.uAlfa.value = 1;
-      if (Math.random() < 0.04) grupo.position.x = (Math.random() - 0.5) * 0.2; else grupo.position.x = 0;
+      grupo.rotation.set(0, Math.sin(seg * 0.5) * 0.15, 0);
+      grupo.position.x = Math.random() < 0.04 ? (Math.random() - 0.5) * 0.25 : 0;
+      estado(0, 1, foto ? 0 : 0.35, 1);
     }
-    renderer.render(cena, camera);
+    comp.render();
+    desenharFoto(modo === 'rosto' ? 1 : 0);
   }
   requestAnimationFrame(quadro);
 
   return {
     vazio() { modo = 'vazio'; },
-    mascara() { modo = 'mascara'; inicio = performance.now(); grupo.position.x = 0; },
+    mascara() { modo = 'mascara'; inicio = performance.now(); },
     async preparar(ia) {
       foto = null;
       if (ia.rosto) {
@@ -316,166 +452,67 @@ export async function criarCabeca(canvasGL, canvas2D) {
 // ============================================================
 // CORPO
 // ============================================================
-function materialCorpo(uniformes, wire) {
-  return new THREE.ShaderMaterial({
-    uniforms: uniformes,
-    wireframe: wire,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-    vertexShader: /* glsl */ `
-      #include <common>
-      #include <skinning_pars_vertex>
-      varying vec3 vN;
-      varying vec3 vV;
-      varying float vY;
-      void main() {
-        #include <skinbase_vertex>
-        #include <beginnormal_vertex>
-        #include <skinnormal_vertex>
-        #include <begin_vertex>
-        #include <skinning_vertex>
-        vec4 mundo = modelMatrix * vec4(transformed, 1.0);
-        vY = mundo.y;
-        vec4 mv = viewMatrix * mundo;
-        vN = normalize(normalMatrix * objectNormal);
-        vV = normalize(-mv.xyz);
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: /* glsl */ `
-      uniform vec3 uCorA;
-      uniform vec3 uBordaA;
-      uniform vec3 uCorB;
-      uniform vec3 uBordaB;
-      uniform float uCorte;
-      uniform float uForca;
-      uniform float uTempo;
-      varying vec3 vN;
-      varying vec3 vV;
-      varying float vY;
-      void main() {
-        float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.0);
-        float novo = smoothstep(uCorte - 0.04, uCorte + 0.04, vY);
-        vec3 cor = mix(uCorA, uCorB, novo);
-        vec3 borda = mix(uBordaA, uBordaB, novo);
-        vec3 c = cor * (0.05 + 0.32 * fres) + borda * pow(fres, 3.0) * 0.9;
-        float faixa = smoothstep(0.03, 0.0, abs(vY - uCorte)) * step(0.001, uCorte) * step(uCorte, 1.95);
-        c += vec3(0.8, 0.97, 1.0) * faixa * 1.5;
-        float linha = 0.85 + 0.15 * step(0.5, fract(gl_FragCoord.y / 3.0));
-        gl_FragColor = vec4(c * uForca * linha, 1.0);
-      }`,
-  });
-}
-
-function texturaBrilho() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d');
-  const r = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  r.addColorStop(0, 'rgba(255,255,255,1)');
-  r.addColorStop(0.18, 'rgba(255,255,255,0.95)');
-  r.addColorStop(0.3, 'rgba(255,255,255,0.25)');
-  r.addColorStop(0.45, 'rgba(255,255,255,0.55)');
-  r.addColorStop(0.55, 'rgba(255,255,255,0.08)');
-  r.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = r;
-  g.fillRect(0, 0, 128, 128);
-  return new THREE.CanvasTexture(c);
-}
-
 export async function criarCorpo(canvas) {
   const L = canvas.width, A = canvas.height;
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.setSize(L, A, false);
+  const renderer = criarRenderer(canvas, L, A);
   const cena = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(26, L / A, 0.1, 50);
-  camera.position.set(0, 0.95, 4.3);
+  const camera = new THREE.PerspectiveCamera(24, L / A, 0.1, 50);
+  camera.position.set(0, 0.9, 5.6);
   camera.lookAt(0, 0.9, 0);
+  const comp = compositor(renderer, cena, camera, L, A, 0.55);
 
-  const gltf = await carregar('modelos/Xbot.glb');
-  const modelo = gltf.scene;
-  const uniSuperficie = {
-    uCorA: { value: LARANJA.clone() }, uBordaA: { value: DOURADO.clone() },
-    uCorB: { value: CIANO.clone() }, uBordaB: { value: CIANO_CLARO.clone() },
-    uCorte: { value: 3 }, uForca: { value: 1 }, uTempo: { value: 0 },
+  const gltf = await carregar('modelos/BrainStem.glb');
+  const geos = congelar(gltf.scene, gltf.animations[0], 0);
+  const caixa = ajustarAltura(geos, 1.82, true);
+
+  const uniLinhas = {
+    uLinhaA: { value: new THREE.Color('#ff6a2a') }, uLinhaB: { value: new THREE.Color('#38c8ff') },
+    uCorte: { value: 9 }, uAlfa: { value: 1 }, uOpacidade: { value: 0.2 },
   };
-  const uniJuntas = {
-    uCorA: { value: DOURADO.clone() }, uBordaA: { value: new THREE.Color('#fff0c0') },
-    uCorB: { value: new THREE.Color('#7fe9ff') }, uBordaB: { value: new THREE.Color('#ffffff') },
-    uCorte: uniSuperficie.uCorte, uForca: { value: 0.55 }, uTempo: uniSuperficie.uTempo,
+  const uniMiolo = {
+    uMioloA: { value: new THREE.Color('#ff3a14') }, uMioloB: { value: new THREE.Color('#1f8fff') },
+    uBorda: { value: new THREE.Color('#ffd27a') }, uCorte: uniLinhas.uCorte, uAlfa: { value: 0.7 }, uBordaForca: { value: 0.4 },
   };
-  const uniArame = {
-    uCorA: { value: new THREE.Color('#ff7a2a') }, uBordaA: { value: new THREE.Color('#ffd27a') },
-    uCorB: { value: new THREE.Color('#2fb8ff') }, uBordaB: { value: new THREE.Color('#bff4ff') },
-    uCorte: uniSuperficie.uCorte, uForca: { value: 0.55 }, uTempo: uniSuperficie.uTempo,
-  };
-  const extras = [];
-  modelo.traverse((o) => {
-    if (!o.isSkinnedMesh) return;
-    o.frustumCulled = false;
-    const juntas = /Joints/i.test(o.name);
-    o.material = materialCorpo(juntas ? uniJuntas : uniSuperficie, false);
-    // segunda camada só com as arestas (o "wireframe" do filme)
-    const arame = new THREE.SkinnedMesh(o.geometry, materialCorpo(uniArame, true));
-    arame.bind(o.skeleton, o.bindMatrix);
-    arame.frustumCulled = false;
-    extras.push([o.parent, arame]);
+  const modelo = new THREE.Group();
+  geos.forEach((g) => {
+    modelo.add(new THREE.Mesh(g, materialMiolo(uniMiolo)));
+    modelo.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), materialLinhas(uniLinhas)));
   });
-  extras.forEach(([pai, m]) => pai.add(m));
-  modelo.rotation.y = -0.32;
   cena.add(modelo);
-
-  const mixer = new THREE.AnimationMixer(modelo);
-  const idle = gltf.animations.find((a) => a.name === 'idle');
-  if (idle) mixer.clipAction(idle).play();
 
   // reator no peito
   const brilho = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: texturaBrilho(), color: new THREE.Color('#ffe6b0'), transparent: true,
+    map: texturaBrilho(), color: new THREE.Color('#ffd9a0'), transparent: true,
     blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
   }));
-  brilho.scale.set(0.2, 0.2, 1);
-  let peito = null;
-  modelo.traverse((o) => { if (o.isBone && /Spine2$/.test(o.name)) peito = o; });
-  if (peito) {
-    peito.add(brilho);
-    // os ossos do Mixamo estão em escala 100x
-    const escala = new THREE.Vector3();
-    peito.getWorldScale(escala);
-    brilho.scale.set(0.2 / escala.x, 0.2 / escala.y, 1);
-    brilho.position.set(0, 0.06 / escala.y, 0.13 / escala.z);
-  } else {
-    brilho.position.set(0, 1.3, 0.15);
-    cena.add(brilho);
-  }
+  brilho.scale.set(0.16, 0.16, 1);
+  brilho.position.set(0, caixa.max.y * 0.7, caixa.max.z * 0.7);
+  modelo.add(brilho);
 
+  const borda = uniMiolo.uBorda.value;
   const relogio = new THREE.Clock();
-  let troca = null; // { inicio, duracao, ida }
+  let troca = null;
   function quadro() {
     requestAnimationFrame(quadro);
-    const dt = relogio.getDelta();
-    mixer.update(dt);
-    const seg = relogio.elapsedTime;
-    uniSuperficie.uTempo.value = seg;
-    modelo.rotation.y = -0.32 + Math.sin(seg * 0.3) * 0.06;
+    const seg = relogio.getElapsedTime();
+    modelo.rotation.y = -0.28 + Math.sin(seg * 0.35) * 0.08;
+    modelo.position.y = Math.sin(seg * 1.1) * 0.006;
     if (troca) {
       const k = Math.min(1, (performance.now() - troca.inicio) / troca.duracao);
       const e = k * k * (3 - 2 * k);
-      // o corte desce da cabeça (y ~1.9) aos pés (y ~0)
-      uniSuperficie.uCorte.value = troca.ida ? 1.95 - e * 2.05 : 3;
+      uniLinhas.uCorte.value = caixa.max.y + 0.05 - e * (caixa.max.y + 0.15);
       if (k >= 1) troca = null;
     }
-    const novo = uniSuperficie.uCorte.value < 1.0;
-    brilho.material.color.set(novo ? '#9ff8ec' : '#ffe0a8');
-    brilho.material.opacity = 0.85 + 0.15 * Math.sin(seg * 4);
-    renderer.render(cena, camera);
+    const ciano = uniLinhas.uCorte.value < caixa.max.y * 0.7;
+    brilho.material.color.set(ciano ? '#9ff8ec' : '#ffd9a0');
+    borda.set(ciano ? '#bff4ff' : '#ffd27a');
+    brilho.material.opacity = 0.8 + 0.2 * Math.sin(seg * 4);
+    comp.render();
   }
   quadro();
 
   return {
-    paraCiano(duracao) { troca = { inicio: performance.now(), duracao, ida: true }; },
-    paraLaranja() { troca = null; uniSuperficie.uCorte.value = 3; },
+    paraCiano(duracao) { troca = { inicio: performance.now(), duracao }; },
+    paraLaranja() { troca = null; uniLinhas.uCorte.value = 9; },
   };
 }

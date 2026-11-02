@@ -23,6 +23,9 @@ e abrir `http://localhost:8000`.
 
 ## Créditos dos modelos 3D
 
-- `modelos/Xbot.glb`: personagem do Mixamo (Adobe), tirado dos exemplos do three.js.
+- `modelos/DamagedHelmet.glb`: "Battle Damaged Sci-fi Helmet - PBR", de theblueturtle_, licença Creative Commons
+  Attribution-NonCommercial 4.0 (Khronos glTF Sample Assets).
+- `modelos/BrainStem.glb`: robô BrainStem, © Smith Micro Software (Poser EULA) e ctxwing (CC BY 4.0)
+  (Khronos glTF Sample Assets).
 - `modelos/LeePerrySmith.glb`: cabeça de Lee Perry-Smith, licença Creative Commons Attribution 3.0, tirada dos
   exemplos do three.js.
