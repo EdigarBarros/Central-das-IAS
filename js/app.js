@@ -17,6 +17,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   let carregada = null;     // IA que está no leitor
   let chipNoLeitor = null;  // { el, dx, dy1, dy2, r }
   let sequencia = 0;        // aumenta a cada chip; cancela animações antigas
+  let vooJanela = null;     // de onde a janela voou até o celular (para voltar ao ejetar)
   const cachePrompts = {};
   const chavePronta = abrirCofre();
 
@@ -125,6 +126,8 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     $('verPrompt').hidden = true;
     document.body.classList.add('ocupado');
     if (chipNoLeitor) {
+      await tirarIADoCelular(minha);
+      if (minha !== sequencia) return;
       await animarSaida();
       telaEmEspera();
       if (minha !== sequencia) return;
@@ -136,10 +139,57 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     await carregarNaTela(ia, minha);
   }
 
+  // A IA sai do celular e volta para o servidor (só quando ela terminou de carregar).
+  async function tirarIADoCelular(minha) {
+    if (!carregada || !tela.classList.contains('final') || !rosto || !corpo) return;
+    const ok = () => minha === sequencia;
+    $('dica').textContent = 'Removendo ' + carregada.etiqueta + '...';
+    tela.classList.remove('final');
+
+    // sistemas e ligações saem; a caixa do nome pisca e se apaga
+    $('sistemas').querySelectorAll('li').forEach((li, i) => li.animate(
+      [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(30px)' }],
+      { duration: 350, delay: i * 70, fill: 'forwards' }
+    ));
+    tela.classList.remove('ciano');
+    const placa = $('placaNome');
+    $('placaSubTexto').textContent = 'DISCONNECTING';
+    placa.animate([{ filter: 'brightness(1)' }, { filter: 'brightness(2.2)', transform: 'translateX(4px)' }, { filter: 'brightness(1)' }], { duration: 500 });
+
+    const saida = corpo.desinstalar();
+    await esperar(600); if (!ok()) return;
+    placa.classList.remove('nova');
+    $('placaTexto').textContent = '';
+    $('placaSubTexto').textContent = '';
+    $('placaSubBarra').getAnimations().forEach((a) => a.cancel());
+    $('nomeFantasma').textContent = '';
+    $('atualizando').classList.remove('visivel');
+
+    // a janela volta do celular para o lugar dela, mostrando o servidor
+    await esperar(300); if (!ok()) return;
+    janela.getAnimations().forEach((a) => a.cancel());
+    $('aguardando').hidden = true;
+    $('porcento').textContent = '0%';
+    $('cargaBarra').style.width = '0%';
+    const volta = rosto.recolher();
+    if (vooJanela) {
+      janela.animate(
+        [{ transform: `translate(${vooJanela.dx}px, ${vooJanela.dy}px) scale(.12)`, opacity: 0 },
+         { transform: `translate(${vooJanela.dx * 0.3}px, ${vooJanela.dy * 0.3}px) scale(.5)`, opacity: 0.9, offset: 0.5 },
+         { transform: 'translate(0,0) scale(1)', opacity: 1 }],
+        { duration: 750, easing: 'cubic-bezier(.3,0,.2,1)' }
+      );
+    }
+    await Promise.all([saida, volta]);
+  }
+
   async function ejetar() {
     const minha = ++sequencia;
     fecharProtocolo();
     $('verPrompt').hidden = true;
+    document.body.classList.add('ocupado');
+    await tirarIADoCelular(minha);
+    if (minha !== sequencia) return;
     carregada = null;
     $('leitorLed').classList.remove('aceso', 'lendo');
     await animarSaida();
@@ -203,6 +253,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     const escala = monitorArea.clientWidth / 1600;
     const dx = (cel.left + cel.width * 0.5 - (jr.left + jr.width / 2)) / escala;
     const dy = (cel.top + cel.height * 0.36 - (jr.top + jr.height / 2)) / escala;
+    vooJanela = { dx, dy };
     janela.animate(
       [
         { transform: 'translate(0,0) scale(1)', opacity: 1 },

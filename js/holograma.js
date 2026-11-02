@@ -316,6 +316,84 @@ export async function criarServidor(canvasGL, canvas2D) {
     gavetas.push({ grupo, leds, faixa, y, fase: Math.random() * 10 });
   }
 
+  // --- as IAs em forma de energia, circulando por dentro do rack ---
+  const texturaPonto = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    r.addColorStop(0, 'rgba(255,255,255,1)');
+    r.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+    r.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = r;
+    g.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+  })();
+  const gavetaDaIA = (i) => Math.min(UNIDADES - 1, 1 + i * 3);
+  const frenteDaGaveta = (i) => new THREE.Vector3(0, gavetas[gavetaDaIA(i)].y, D / 2 + 0.02);
+  const TAM_RASTRO = 60;
+  const energias = (window.IAS || []).map((ia, i) => {
+    const cor = new THREE.Color(ia.cor || '#3fd0ff');
+    const pts = [];
+    const n = 10;
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2 + i * 2.1;
+      pts.push(new THREE.Vector3(
+        Math.cos(a) * (0.34 + 0.1 * Math.sin(k * 2.3 + i * 1.3)),
+        Math.sin(a * 2 + i * 1.9) * (H / 2 - 0.32) * (0.55 + 0.45 * Math.cos(k * 1.7 + i)),
+        Math.sin(a) * 0.3 + 0.08 * Math.cos(k * 3 + i),
+      ));
+    }
+    const curva = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5);
+    const cabeca = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: texturaPonto, color: cor, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    }));
+    cabeca.scale.setScalar(0.2);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TAM_RASTRO * 3), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(TAM_RASTRO * 3), 3));
+    const rastro3d = new THREE.Points(geo, new THREE.PointsMaterial({
+      size: 0.17, map: texturaPonto, vertexColors: true, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, sizeAttenuation: true,
+    }));
+    rastro3d.frustumCulled = false;
+    rack.add(cabeca, rastro3d);
+    return { cor, curva, cabeca, rastro3d, historico: [], u: Math.random(), vel: 0.055 + 0.012 * i, alfa: 1, alfaAlvo: 1, voo: null };
+  });
+
+  // move cada energia: pelo caminho dela ou num voo até um ponto (ex.: a gaveta)
+  function moverEnergias(dt, seg) {
+    const agora = performance.now();
+    for (const e of energias) {
+      let p;
+      if (e.voo) {
+        const k = Math.min(1, (agora - e.voo.inicio) / e.voo.dur);
+        const q = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+        p = e.voo.de.clone().lerp(e.voo.para, q);
+        p.y += Math.sin(k * Math.PI) * 0.25;
+        p.x += Math.sin(k * Math.PI * 2) * 0.12;
+      } else {
+        e.u = (e.u + e.vel * dt) % 1;
+        p = e.curva.getPointAt(e.u);
+      }
+      e.alfa += (e.alfaAlvo - e.alfa) * Math.min(1, dt * 5);
+      e.cabeca.position.copy(p);
+      e.cabeca.material.opacity = e.alfa;
+      e.cabeca.scale.setScalar(0.3 + 0.06 * Math.sin(seg * 6 + e.vel * 100));
+      e.historico.unshift(p.clone());
+      if (e.historico.length > TAM_RASTRO) e.historico.length = TAM_RASTRO;
+      const pos = e.rastro3d.geometry.attributes.position, cor = e.rastro3d.geometry.attributes.color;
+      for (let k = 0; k < TAM_RASTRO; k++) {
+        const h = e.historico[Math.min(k, e.historico.length - 1)];
+        pos.setXYZ(k, h.x, h.y, h.z);
+        const f = Math.pow(1 - k / TAM_RASTRO, 1.6) * e.alfa;
+        cor.setXYZ(k, e.cor.r * f, e.cor.g * f, e.cor.b * f);
+      }
+      pos.needsUpdate = true;
+      cor.needsUpdate = true;
+    }
+  }
+
   // --- base de projeção ---
   const base = new THREE.Group();
   const matBase = materialLinhas({ ...uniLinhas, uOpacidade: { value: 0.3 } });
@@ -455,7 +533,8 @@ export async function criarServidor(canvasGL, canvas2D) {
 
   let modo = 'vazio';
   let inicio = 0;
-  let escolhida = -1;
+  let escolhida = -1;      // gaveta da IA escolhida
+  let iaEscolhida = -1;    // índice da IA (e da energia dela)
   let aoTerminar = null;
   let anterior = performance.now();
 
@@ -472,6 +551,9 @@ export async function criarServidor(canvasGL, canvas2D) {
     });
   }
 
+  const FORA = 0.55;   // quanto a gaveta desliza para fora
+  const fechada = D / 2 - 0.04;
+
   function quadro(agora) {
     requestAnimationFrame(quadro);
     const dt = Math.min(0.05, (agora - anterior) / 1000);
@@ -486,7 +568,9 @@ export async function criarServidor(canvasGL, canvas2D) {
       grupo.rotation.set(0, 0.55 + Math.sin(seg * 0.5) * 0.35, 0);
       grupo.position.x = 0;
       uniLinhas.uAlfa.value = 1; uniMiolo.uAlfa.value = 0.8;
-      gavetas.forEach((g) => { g.grupo.position.z = D / 2 - 0.04; });
+      gavetas.forEach((g) => { g.grupo.position.z = fechada; });
+      energias.forEach((e) => { e.alfaAlvo = 1; });
+      moverEnergias(dt, seg);
       luzes(seg, 0);
       base.rotation.y = seg * 0.3;
       comp.render();
@@ -494,27 +578,33 @@ export async function criarServidor(canvasGL, canvas2D) {
     }
 
     if (modo === 'transformando') {
-      // 1) o rack vira de frente e a gaveta da IA acende e desliza para fora
+      // 1) o rack vira de frente; a energia da IA voa até a gaveta dela e entra
       const vira = suave(0, 1100, t);
       grupo.rotation.set(0, (0.55 + Math.sin(t / 600) * 0.2) * (1 - vira), 0);
-      const tremor = suave(900, 1300, t) * (1 - suave(1700, 2100, t));
+      const tremor = suave(1000, 1400, t) * (1 - suave(1800, 2200, t));
       grupo.position.x = (Math.random() - 0.5) * 0.06 * tremor;
       const g = gavetas[escolhida];
-      g.grupo.position.z = D / 2 - 0.04 + 0.55 * suave(500, 1400, t);
-      // 2) o rack se apaga devagar enquanto o rosto aparece
-      const apaga = 1 - 0.8 * suave(1500, 2300, t) - 0.2 * suave(2900, 3500, t);
-      luzes(seg, 0.25 + 0.5 * suave(300, 900, t) + 0.25 * Math.sin(seg * 18) * suave(900, 1400, t), Math.max(0, (apaga - 0.2) / 0.8));
+      const apaga = 1 - 0.8 * suave(1600, 2400, t) - 0.2 * suave(2900, 3500, t);
+      energias.forEach((e, i) => {
+        if (i === iaEscolhida) e.alfaAlvo = t < 700 ? 1 : 0;
+        else e.alfaAlvo = 0.7 * Math.max(0, (apaga - 0.2) / 0.8);
+      });
+      moverEnergias(dt, seg);
+      // 2) a gaveta acende e desliza para fora
+      g.grupo.position.z = fechada + FORA * suave(800, 1500, t);
+      luzes(seg, 0.2 + 0.55 * suave(600, 1000, t) + 0.25 * Math.sin(seg * 18) * suave(1000, 1500, t), Math.max(0, (apaga - 0.2) / 0.8));
+      // 3) o rack se apaga devagar enquanto o rosto aparece
       uniLinhas.uAlfa.value = apaga; uniMiolo.uAlfa.value = 0.8 * apaga;
       base.rotation.y = seg * 0.3;
       comp.render();
 
-      // 3) fumaça de energia saindo da gaveta e se juntando no rosto
+      // 4) fumaça de energia saindo da gaveta e se juntando no rosto
       const origem = telaDe(g.grupo, new THREE.Vector3(0, 0, 0.05));
-      const emitir = suave(800, 1200, t) * (1 - suave(2700, 3300, t));
+      const emitir = suave(1000, 1300, t) * (1 - suave(2700, 3300, t));
       const juntar = suave(1800, 3000, t);
       fumaca(seg, dt, origem, emitir, juntar);
 
-      // 4) o rosto se materializa no meio da fumaça, com a borda acesa
+      // 5) o rosto se materializa no meio da fumaça, com a borda acesa
       const r = -0.05 + 1.25 * suave(1700, 3600, t);
       if (r > 0) materializar(Math.min(1.2, r), 1 - suave(3400, 3900, t));
       if (t > 4000) {
@@ -527,9 +617,44 @@ export async function criarServidor(canvasGL, canvas2D) {
 
     if (modo === 'rosto') {
       uniLinhas.uAlfa.value = 0; uniMiolo.uAlfa.value = 0;
+      energias.forEach((e) => { e.alfaAlvo = 0; });
+      moverEnergias(dt, seg);
       comp.render();
       fumaca(seg, dt, [L / 2, A / 2], 0, 0);
       desenharRostoPronto(1);
+      return;
+    }
+
+    if (modo === 'voltando') {
+      // a IA volta do celular: o rack reaparece, a energia entra na gaveta e ela se fecha
+      grupo.rotation.set(0, 0, 0);
+      grupo.position.x = 0;
+      const aparece = suave(0, 500, t);
+      uniLinhas.uAlfa.value = aparece; uniMiolo.uAlfa.value = 0.8 * aparece;
+      const g = gavetas[escolhida];
+      g.grupo.position.z = fechada + FORA * (1 - suave(1000, 1600, t));
+      energias.forEach((e, i) => {
+        if (i === iaEscolhida) e.alfaAlvo = t < 1000 ? 1 : 0;
+        else e.alfaAlvo = suave(500, 1400, t);
+      });
+      moverEnergias(dt, seg);
+      luzes(seg, 0.75 * (1 - suave(1200, 1700, t)), aparece);
+      base.rotation.y = seg * 0.3;
+      comp.render();
+      fumaca(seg, dt, [L / 2, A / 2], 0, 0);
+      if (t > 1800) {
+        modo = 'mascara';
+        inicio = performance.now();
+        escolhida = -1;
+        if (iaEscolhida >= 0 && energias[iaEscolhida]) {
+          const e = energias[iaEscolhida];
+          e.voo = null;
+          e.historico = [];
+          e.alfa = 0;
+        }
+        iaEscolhida = -1;
+        if (aoTerminar) { aoTerminar(); aoTerminar = null; }
+      }
     }
   }
   requestAnimationFrame(quadro);
@@ -541,8 +666,25 @@ export async function criarServidor(canvasGL, canvas2D) {
       modo = 'mascara';
       inicio = performance.now();
       escolhida = -1;
+      iaEscolhida = -1;
+      energias.forEach((e) => { e.voo = null; });
       particulas = [];
       rctx.clearRect(0, 0, L, A);
+    },
+    // a IA sai do celular e volta para o servidor
+    recolher() {
+      return new Promise((ok) => {
+        if (escolhida < 0) { ok(); return; }
+        modo = 'voltando';
+        inicio = performance.now();
+        aoTerminar = ok;
+        const e = energias[iaEscolhida];
+        if (e) {
+          e.historico = [];
+          e.alfa = 1;
+          e.voo = { de: new THREE.Vector3(1.7, 1.5, 1.4), para: frenteDaGaveta(iaEscolhida).add(new THREE.Vector3(0, 0, FORA)), inicio: performance.now() + 150, dur: 900 };
+        }
+      });
     },
     async preparar(ia) {
       corRgb = hexParaRgb(ia.cor || '#3fd0ff');
@@ -550,7 +692,8 @@ export async function criarServidor(canvasGL, canvas2D) {
       const lista = window.IAS || [];
       const i = Math.max(0, lista.indexOf(ia));
       // espalha as IAs pelas gavetas do rack
-      escolhida = Math.min(UNIDADES - 1, 1 + i * 3);
+      iaEscolhida = i;
+      escolhida = gavetaDaIA(i);
       rosto = null;
       if (ia.rosto) {
         try { rosto = await fotoHolograma(ia.rosto, L, A); } catch (e) { console.warn('Não consegui abrir o rosto de', ia.nome, e); }
@@ -573,6 +716,8 @@ export async function criarServidor(canvasGL, canvas2D) {
         modo = 'transformando';
         inicio = performance.now();
         aoTerminar = ok;
+        const e = energias[iaEscolhida];
+        if (e) e.voo = { de: e.cabeca.position.clone(), para: frenteDaGaveta(iaEscolhida), inicio: performance.now(), dur: 750 };
       });
     },
   };
@@ -785,10 +930,10 @@ export async function criarCelular(canvas) {
     ctx.restore();
   }
 
-  function desenharRosto(ctx, img, alfa, revela, escala, brilhoVarredura) {
+  function desenharRosto(ctx, img, alfa, revela, escala, brilhoVarredura, dy = 0) {
     if (!img) return;
     const w = TW * 0.8 * escala, h = w * (img.height / img.width);
-    const x = (TW - w) / 2, y = TH * 0.33 - h / 2;
+    const x = (TW - w) / 2, y = TH * 0.33 - h / 2 + dy;
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, TW, y + h * revela);
@@ -873,6 +1018,27 @@ export async function criarCelular(canvas) {
         ctx.textAlign = 'center';
         ctx.fillText('› ' + atual + (k >= 1 ? '  ok' : '...'), TW / 2, TH * 0.81);
       }
+    } else if (estadoTela.modo === 'saindo') {
+      // a IA sai do celular: o rosto é puxado para cima e se desfaz, o anel esvazia
+      const sobe = suave(0.15, 1.3, t);
+      const ondula = Math.sin(agora / 40) * 6 * sobe;
+      desenharRosto(ctx, estadoTela.rosto, (1 - suave(0.4, 1.3, t)) * (0.85 + 0.15 * Math.random()),
+        1 - suave(0.2, 1.25, t), 1 + 0.12 * sobe, 1, -TH * 0.22 * sobe + ondula);
+      const k = 1 - suave(0.2, 1.6, t);
+      const cx = TW / 2, cy = TH * 0.71, r = 58;
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = tom(0.18);
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = claro(1);
+      ctx.shadowColor = cor; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); ctx.stroke();
+      ctx.shadowBlur = 0;
+      texto(ctx, Math.floor(k * 100) + '%', cx, cy + 12, 38, claro(1), 700, 0);
+      texto(ctx, t < 1.6 ? 'DESCONECTANDO ' + estadoTela.nome : 'IA DESCONECTADA', cx, TH * 0.61, 30, claro(0.9));
+      ctx.font = '500 19px "Barlow Condensed", sans-serif';
+      ctx.fillStyle = claro(0.7);
+      ctx.textAlign = 'center';
+      ctx.fillText(t < 0.9 ? '› salvando contexto...' : t < 1.6 ? '› liberando memória...' : '› pronto', TW / 2, TH * 0.81);
     } else if (estadoTela.modo === 'pronto') {
       desenharRosto(ctx, estadoTela.rosto, 0.92 + 0.08 * Math.random(), 1, 1, 0);
       texto(ctx, estadoTela.nome, TW / 2, TH * 0.66, 64, claro(1), 700, 6);
@@ -918,7 +1084,9 @@ export async function criarCelular(canvas) {
     if (troca) {
       const k = Math.min(1, (performance.now() - troca.inicio) / troca.duracao);
       const e = k * k * (3 - 2 * k);
-      uniLinhas.uCorte.value = ALT / 2 + 0.05 - e * (ALT + 0.4);
+      uniLinhas.uCorte.value = troca.volta
+        ? -ALT / 2 - 0.3 + e * (ALT + 0.6)        // volta ao branco, de baixo para cima
+        : ALT / 2 + 0.05 - e * (ALT + 0.4);
       if (k >= 1) troca = null;
     }
     const trocou = uniLinhas.uCorte.value < 0;
@@ -948,6 +1116,14 @@ export async function criarCelular(canvas) {
         if (v === versao) estadoTela = { ...estadoTela, modo: 'pronto' };
         ok();
       }, 3100));
+    },
+    // a IA sai do celular; resolve quando terminar
+    desinstalar() {
+      const v = ++versao;
+      if (estadoTela.modo === 'repouso') return Promise.resolve();
+      estadoTela = { ...estadoTela, modo: 'saindo', inicio: performance.now() };
+      setTimeout(() => { if (v === versao) troca = { inicio: performance.now(), duracao: 1300, volta: true }; }, 450);
+      return new Promise((ok) => setTimeout(ok, 1900));
     },
     repouso() {
       versao++;
