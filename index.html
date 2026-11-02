@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Central das IAs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&family=Rock+Salt&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/estilo.css">
+</head>
+<body>
+  <main class="laboratorio">
+
+    <!-- ===================== MONITOR ===================== -->
+    <section class="monitor" aria-label="Monitor">
+      <div class="monitor-moldura">
+        <div class="monitor-area" id="monitorArea">
+          <div class="tela" id="tela">
+
+            <!-- moldura de cantoneiras -->
+            <svg class="tela-moldura" viewBox="0 0 1600 900" aria-hidden="true">
+              <path d="M70 38 H560 L572 50 H1028 L1040 38 H1530 L1562 70 V830 L1530 862 H1040 L1028 850 H572 L560 862 H70 L38 830 V70 Z" />
+              <path class="fino" d="M38 250 V650 M1562 250 V650" />
+              <g class="tracos">
+                <path d="M30 120 h8 M30 135 h8 M30 290 h8 M30 305 h8 M30 470 h8 M30 590 h8 M30 605 h8 M30 760 h8" />
+                <path d="M1562 120 h8 M1562 135 h8 M1562 290 h8 M1562 305 h8 M1562 470 h8 M1562 590 h8 M1562 605 h8 M1562 760 h8" />
+              </g>
+              <path class="fino" d="M1180 300 L1150 340 L1180 380 M1180 560 L1150 600 L1180 640" />
+            </svg>
+
+            <!-- barra superior -->
+            <div class="barra-topo">
+              <div class="abas"><span class="ativa">MAIN</span><span>SYS</span><span>NET</span><span>LOG</span></div>
+              <div class="topo-meio"><span>OS 45.0.1</span><span>LINK</span><span>CORE</span><span>DIAG</span></div>
+              <div class="topo-icones">
+                <i class="ic-menu"></i><i class="ic-sinal"></i><i class="ic-ponto"></i>
+              </div>
+            </div>
+
+            <!-- coluna da esquerda -->
+            <div class="coluna-esq">
+              <div class="nome-fantasma" id="nomeFantasma">J.A.R.V.I.S</div>
+              <div class="linhas-fantasma"><i></i><i></i><i></i></div>
+              <div class="atualizando" id="atualizando">UPDATING...</div>
+              <div class="painel-fantasma p1"></div>
+              <div class="painel-fantasma p2"></div>
+            </div>
+            <div class="vidro-fundo"></div>
+
+            <!-- janela da interface de linguagem -->
+            <div class="janela" id="janela">
+              <div class="janela-titulo">INITIATING LANGUAGE INTERFACE</div>
+              <div class="janela-conteudo">
+                <canvas id="rosto" width="400" height="480"></canvas>
+                <div class="aguardando" id="aguardando">AWAITING LANGUAGE MODULE</div>
+              </div>
+              <div class="janela-rodape">
+                <div class="carga"><i id="cargaBarra"></i></div>
+                <span class="porcento" id="porcento">0%</span>
+              </div>
+              <div class="janela-clarao" id="clarao"></div>
+            </div>
+
+            <!-- corpo em wireframe -->
+            <div class="corpo" id="corpo">
+              <svg viewBox="-160 -10 320 680" class="corpo-svg laranja" id="corpoLaranja" aria-hidden="true"></svg>
+              <svg viewBox="-160 -10 320 680" class="corpo-svg ciano" id="corpoCiano" aria-hidden="true"></svg>
+            </div>
+
+            <!-- ligações até a lista de sistemas -->
+            <svg class="ligacoes" id="ligacoes" viewBox="0 0 1600 900" aria-hidden="true">
+              <path d="M1010 215 H1150 L1180 190 H1262" />
+              <path d="M1040 300 H1170 L1200 285 H1262" class="amarela" />
+              <path d="M1000 380 H1190 L1215 368 H1262" />
+              <path d="M1060 470 H1262" />
+              <path d="M1000 540 H1200 L1225 528 H1262" />
+              <circle cx="1010" cy="215" r="3" /><circle cx="1040" cy="300" r="3" /><circle cx="1000" cy="380" r="3" />
+              <circle cx="1060" cy="470" r="3" /><circle cx="1000" cy="540" r="3" />
+            </svg>
+
+            <!-- lista de sistemas -->
+            <ul class="sistemas" id="sistemas"></ul>
+
+            <!-- caixa do nome -->
+            <div class="placa-nome" id="placaNome">
+              <div class="placa-cabecalho" id="placaCabecalho">MARK XLV OPERATING SYSTEM</div>
+              <div class="placa-caixa" id="placaCaixa">
+                <svg class="placa-asas" viewBox="0 0 40 20" aria-hidden="true"><path d="M2 6 L14 9 L20 4 L26 9 L38 6 L28 14 L20 11 L12 14 Z" /></svg>
+                <span class="placa-texto" id="placaTexto">J.A.R.V.I.S</span>
+                <i class="placa-quadrado"></i>
+              </div>
+              <div class="placa-sub"><i id="placaSubBarra"></i><span id="placaSubTexto"></span></div>
+            </div>
+
+            <!-- ícones de baixo -->
+            <div class="icones-base">
+              <i><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4 V9 M6 15 L10 13 M18 15 L14 13"/></svg></i>
+              <i><svg viewBox="0 0 24 24"><path d="M12 4 L20 19 H4 Z"/><path d="M12 10 L15 16 H9 Z"/></svg></i>
+              <i><svg viewBox="0 0 24 24"><path d="M12 3 V21 M3 12 H21 M5.6 5.6 L18.4 18.4 M18.4 5.6 L5.6 18.4"/><circle cx="12" cy="12" r="3"/></svg></i>
+              <i><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6 10 H18 M6 14 H18"/></svg></i>
+              <i><svg viewBox="0 0 24 24"><path d="M12 3 L19 6 V12 C19 16 16 19 12 21 C8 19 5 16 5 12 V6 Z"/></svg></i>
+            </div>
+
+            <div class="varredura" aria-hidden="true"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== BANCADA ===================== -->
+    <section class="bancada" id="bancada" aria-label="Bancada com os chips">
+      <div class="leitor" id="leitor" aria-hidden="true">
+        <div class="leitor-grade"></div>
+        <div class="leitor-visor"><i id="leitorLed"></i></div>
+        <div class="leitor-boca"></div>
+      </div>
+      <div class="chips" id="chips"></div>
+      <p class="dica" id="dica">Toque em um chip para carregar a IA</p>
+    </section>
+  </main>
+
+  <!-- ===================== PROMPT ===================== -->
+  <div class="protocolo" id="protocolo" hidden>
+    <div class="protocolo-janela" role="dialog" aria-modal="true" aria-labelledby="protocoloTitulo">
+      <header class="protocolo-topo">
+        <div>
+          <small>LANGUAGE MODULE // FULL PROTOCOL</small>
+          <h2 id="protocoloTitulo">V.E.R.Ô.N.I.C.A.</h2>
+        </div>
+        <button class="botao-fechar" id="fecharProtocolo" aria-label="Fechar">✕</button>
+      </header>
+      <pre class="protocolo-texto" id="protocoloTexto"></pre>
+      <footer class="protocolo-rodape">
+        <button class="botao" id="copiar">Copiar prompt</button>
+        <button class="botao secundario" id="ejetar">Ejetar chip</button>
+      </footer>
+    </div>
+  </div>
+
+  <button class="botao flutuante" id="verPrompt" hidden>Ver prompt</button>
+
+  <script src="ias/lista.js"></script>
+  <script src="js/formas.js"></script>
+  <script src="js/rosto.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
