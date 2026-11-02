@@ -1,3 +1,5 @@
+import { criarCabeca, criarCorpo } from './holograma.js';
+
 (function () {
   const $ = (id) => document.getElementById(id);
   const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -5,7 +7,11 @@
   const tela = $('tela');
   const monitorArea = $('monitorArea');
   const janela = $('janela');
-  const rosto = criarRosto($('rosto'));
+  let rosto = null;
+  let corpo = null;
+  const pronto = Promise.all([criarCabeca($('rosto3d'), $('rosto')), criarCorpo($('corpo3d'))])
+    .then(([r, c]) => { rosto = r; corpo = c; })
+    .catch((e) => { console.error('Falha ao carregar os modelos 3D', e); });
 
   const CHAVE_ANTERIOR = 'central-ias:anterior';
   let carregada = null;     // IA que está no leitor
@@ -32,8 +38,6 @@
   ajustar();
 
   // ---------------- montagem ----------------
-  $('corpoLaranja').innerHTML = CORPO_SVG;
-  $('corpoCiano').innerHTML = CORPO_SVG;
   $('placaCabecalho').textContent = CABECALHO_SISTEMA;
 
   const giros = [-9, 6, -4, 10, -12, 3, 8, -6, 12, -2];
@@ -63,10 +67,7 @@
     $('aguardando').hidden = false;
     $('porcento').textContent = '0%';
     $('cargaBarra').style.width = '0%';
-    rosto.mascara();
-
-    $('corpoCiano').getAnimations().forEach((a) => a.cancel());
-    $('corpoLaranja').getAnimations().forEach((a) => a.cancel());
+    pronto.then(() => { rosto && rosto.mascara(); corpo && corpo.paraLaranja(); });
     tela.classList.remove('ciano', 'trocando', 'final');
 
     const placa = $('placaNome');
@@ -174,6 +175,8 @@
     const led = $('leitorLed');
     led.classList.add('lendo');
 
+    await pronto;
+    if (!rosto || !corpo) { $('dica').textContent = 'Não consegui carregar os modelos 3D. Recarregue a página.'; return; }
     await rosto.preparar(ia);
     if (!ok()) return;
     $('aguardando').hidden = true;
@@ -200,10 +203,10 @@
 
     // a janela encolhe e voa até a cabeça do corpo
     const jr = janela.getBoundingClientRect();
-    const cabeca = document.querySelector('#corpoLaranja').getBoundingClientRect();
+    const cabeca = $('corpo3d').getBoundingClientRect();
     const escala = monitorArea.clientWidth / 1600;
-    const dx = (cabeca.left + cabeca.width * 0.5 - (jr.left + jr.width / 2)) / escala + 70;
-    const dy = (cabeca.top + cabeca.height * 0.12 - (jr.top + jr.height / 2)) / escala;
+    const dx = (cabeca.left + cabeca.width * 0.5 - (jr.left + jr.width / 2)) / escala;
+    const dy = (cabeca.top + cabeca.height * 0.16 - (jr.top + jr.height / 2)) / escala;
     janela.animate(
       [
         { transform: 'translate(0,0) scale(1)', opacity: 1 },
@@ -217,14 +220,7 @@
 
     await esperar(500); if (!ok()) return;
     tela.classList.add('trocando');
-    $('corpoCiano').animate(
-      [{ clipPath: 'inset(0 0 100% 0)' }, { clipPath: 'inset(0 0 0% 0)' }],
-      { duration: 1400, easing: 'ease-in-out', fill: 'forwards' }
-    );
-    $('corpoLaranja').animate(
-      [{ opacity: 1 }, { opacity: 0 }],
-      { duration: 1400, easing: 'ease-in', fill: 'forwards' }
-    );
+    corpo.paraCiano(1600);
 
     await esperar(800); if (!ok()) return;
     const placa = $('placaNome');

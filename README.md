@@ -20,3 +20,9 @@ python3 -m http.server 8000
 ```
 
 e abrir `http://localhost:8000`.
+
+## Créditos dos modelos 3D
+
+- `modelos/Xbot.glb`: personagem do Mixamo (Adobe), tirado dos exemplos do three.js.
+- `modelos/LeePerrySmith.glb`: cabeça de Lee Perry-Smith, licença Creative Commons Attribution 3.0, tirada dos
+  exemplos do three.js.

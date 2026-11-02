@@ -53,7 +53,8 @@
             <div class="janela" id="janela">
               <div class="janela-titulo">INITIATING LANGUAGE INTERFACE</div>
               <div class="janela-conteudo">
-                <canvas id="rosto" width="400" height="480"></canvas>
+                <canvas id="rosto3d" class="camada"></canvas>
+                <canvas id="rosto" class="camada" width="400" height="480"></canvas>
                 <div class="aguardando" id="aguardando">AWAITING LANGUAGE MODULE</div>
               </div>
               <div class="janela-rodape">
@@ -65,8 +66,7 @@
 
             <!-- corpo em wireframe -->
             <div class="corpo" id="corpo">
-              <svg viewBox="-160 -10 320 680" class="corpo-svg laranja" id="corpoLaranja" aria-hidden="true"></svg>
-              <svg viewBox="-160 -10 320 680" class="corpo-svg ciano" id="corpoCiano" aria-hidden="true"></svg>
+              <canvas id="corpo3d" width="460" height="760" aria-hidden="true"></canvas>
             </div>
 
             <!-- ligações até a lista de sistemas -->
@@ -141,9 +141,16 @@
 
   <button class="botao flutuante" id="verPrompt" hidden>Ver prompt</button>
 
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
   <script src="ias/lista.js"></script>
   <script src="js/formas.js"></script>
-  <script src="js/rosto.js"></script>
-  <script src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
