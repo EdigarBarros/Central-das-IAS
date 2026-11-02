@@ -17,7 +17,6 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 const MODELOS = {
   capacete: 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb',
   cabeca: 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/models/gltf/LeePerrySmith/LeePerrySmith.glb',
-  corpo: 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/BrainStem/glTF-Binary/BrainStem.glb',
 };
 
 const carregador = new GLTFLoader();
@@ -83,8 +82,8 @@ function compositor(renderer, cena, camera, L, A, forca) {
   return c;
 }
 
-function criarRenderer(canvas, L, A) {
-  const r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+function criarRenderer(canvas, L, A, guardarQuadro) {
+  const r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: !!guardarQuadro });
   r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   r.setSize(L, A, false);
   r.setClearColor(0x000000, 1);
@@ -199,7 +198,7 @@ async function fotoHolograma(src, L, A) {
   const d = ctx.getImageData(0, 0, L, A);
   const p = d.data;
   for (let i = 0; i < p.length; i += 4) {
-    const l = (0.3 * p[i] + 0.59 * p[i + 1] + 0.11 * p[i + 2]) / 255;
+    const l = (0.3 * p[i] + 0.59 * p[i + 1] + 0.11 * p[i + 2]) / 255 * (p[i + 3] / 255);
     const x = (i / 4) % L, y = Math.floor(i / 4 / L);
     const borda = suave(0, 40, x) * suave(0, 40, L - x) * suave(0, 30, y) * suave(0, 50, A - y);
     const a = suave(0.1, 0.65, l) * borda;
@@ -218,7 +217,7 @@ async function fotoHolograma(src, L, A) {
 export async function criarCabeca(canvasGL, canvas2D) {
   const L = canvas2D.width, A = canvas2D.height;
   const ctx = canvas2D.getContext('2d');
-  const renderer = criarRenderer(canvasGL, L, A);
+  const renderer = criarRenderer(canvasGL, L, A, true);
   const cena = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, L / A, 0.1, 100);
   camera.position.set(0, 1.0, 15);
@@ -438,6 +437,14 @@ export async function criarCabeca(canvasGL, canvas2D) {
   requestAnimationFrame(quadro);
 
   return {
+    // imagem do rosto já formado, para levar até a tela do celular
+    retrato() {
+      if (foto) return foto;
+      const c = document.createElement('canvas');
+      c.width = L; c.height = A;
+      c.getContext('2d').drawImage(canvasGL, 0, 0, L, A);
+      return c;
+    },
     vazio() { modo = 'vazio'; },
     mascara() { modo = 'mascara'; inicio = performance.now(); },
     async preparar(ia) {
@@ -457,69 +464,375 @@ export async function criarCabeca(canvasGL, canvas2D) {
 }
 
 // ============================================================
-// CORPO
+// CELULAR (no lugar do corpo): iPhone 17 Pro Max em holograma
+// Medidas reais: 163,4 x 78 x 8,75 mm (1 unidade = 100 mm).
 // ============================================================
-export async function criarCorpo(canvas) {
+const ALT = 1.634, LARG = 0.78, ESP = 0.0875, RAIO = 0.125;
+
+function retanguloArredondado(l, a, r) {
+  const s = new THREE.Shape();
+  const x = -l / 2, y = -a / 2;
+  s.moveTo(x + r, y);
+  s.lineTo(x + l - r, y);
+  s.quadraticCurveTo(x + l, y, x + l, y + r);
+  s.lineTo(x + l, y + a - r);
+  s.quadraticCurveTo(x + l, y + a, x + l - r, y + a);
+  s.lineTo(x + r, y + a);
+  s.quadraticCurveTo(x, y + a, x, y + a - r);
+  s.lineTo(x, y + r);
+  s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+}
+
+// contorno de um retângulo arredondado, desenhado como linha, numa profundidade z
+function linhaContorno(l, a, r, z, cx = 0, cy = 0) {
+  const pts = retanguloArredondado(l, a, r).getPoints(24).map((p) => new THREE.Vector3(p.x + cx, p.y + cy, z));
+  return new THREE.BufferGeometry().setFromPoints(pts);
+}
+function linhaCirculo(raio, x, y, z, segs = 64) {
+  const pts = [];
+  for (let i = 0; i <= segs; i++) {
+    const a = (i / segs) * Math.PI * 2;
+    pts.push(new THREE.Vector3(x + Math.cos(a) * raio, y + Math.sin(a) * raio, z));
+  }
+  return new THREE.BufferGeometry().setFromPoints(pts);
+}
+// botão lateral: caixinha arredondada saindo da lateral
+function botao(lado, y, comp, saliencia = 0.008) {
+  const g = new THREE.BoxGeometry(saliencia * 2, comp, ESP * 0.42);
+  g.translate(lado * (LARG / 2), y, 0);
+  return g;
+}
+
+// tela do celular: canvas desenhado a cada quadro
+function criarTelaCanvas() {
+  const c = document.createElement('canvas');
+  c.width = 480; c.height = 1040;
+  return c;
+}
+
+export async function criarCelular(canvas) {
   const L = canvas.width, A = canvas.height;
   const renderer = criarRenderer(canvas, L, A);
   const cena = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(24, L / A, 0.1, 50);
-  camera.position.set(0, 0.9, 5.6);
-  camera.lookAt(0, 0.9, 0);
-  const comp = compositor(renderer, cena, camera, L, A, 0.55);
-
-  const gltf = await carregar(MODELOS.corpo);
-  const geos = congelar(gltf.scene, gltf.animations[0], 0);
-  const caixa = ajustarAltura(geos, 1.82, true);
+  camera.position.set(0, -0.02, 5.0);
+  camera.lookAt(0, -0.02, 0);
+  const comp = compositor(renderer, cena, camera, L, A, 0.7);
 
   const uniLinhas = {
-    uLinhaA: { value: new THREE.Color('#ff6a2a') }, uLinhaB: { value: new THREE.Color('#38c8ff') },
-    uCorte: { value: 9 }, uAlfa: { value: 1 }, uOpacidade: { value: 0.2 },
+    uLinhaA: { value: new THREE.Color('#ff6a2a') }, uLinhaB: { value: new THREE.Color('#3fd0ff') },
+    uCorte: { value: 9 }, uAlfa: { value: 1 }, uOpacidade: { value: 0.75 },
   };
+  const uniFinas = { ...uniLinhas, uOpacidade: { value: 0.32 } };
   const uniMiolo = {
     uMioloA: { value: new THREE.Color('#ff3a14') }, uMioloB: { value: new THREE.Color('#1f8fff') },
-    uBorda: { value: new THREE.Color('#ffd27a') }, uCorte: uniLinhas.uCorte, uAlfa: { value: 0.7 }, uBordaForca: { value: 0.4 },
+    uBorda: { value: new THREE.Color('#ffd27a') }, uCorte: uniLinhas.uCorte, uAlfa: { value: 0.9 }, uBordaForca: { value: 0.6 },
   };
-  const modelo = new THREE.Group();
-  geos.forEach((g) => {
-    modelo.add(new THREE.Mesh(g, materialMiolo(uniMiolo)));
-    modelo.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), materialLinhas(uniLinhas)));
+  const matLinha = materialLinhas(uniLinhas);
+  const matFina = materialLinhas(uniFinas);
+  const matMiolo = materialMiolo(uniMiolo);
+
+  const celular = new THREE.Group();
+  const linha = (g, fina) => celular.add(new THREE.Line(g, fina ? matFina : matLinha));
+  const arestas = (g, ang = 30, fina = false) => celular.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, ang), fina ? matFina : matLinha));
+  const miolo = (g) => celular.add(new THREE.Mesh(g, matMiolo));
+
+  // --- corpo: alumínio com cantos arredondados ---
+  const bisel = 0.016;
+  const corpoGeo = new THREE.ExtrudeGeometry(retanguloArredondado(LARG - bisel * 2, ALT - bisel * 2, RAIO - bisel), {
+    depth: ESP - bisel * 2, bevelEnabled: true, bevelThickness: bisel, bevelSize: bisel, bevelSegments: 4, curveSegments: 20,
   });
-  cena.add(modelo);
+  corpoGeo.translate(0, 0, -(ESP - bisel * 2) / 2);
+  corpoGeo.computeVertexNormals();
+  miolo(corpoGeo);
+  // contornos do aro (frente, meio e trás)
+  linha(linhaContorno(LARG - 0.01, ALT - 0.01, RAIO - 0.005, ESP / 2));
+  linha(linhaContorno(LARG, ALT, RAIO, 0), true);
+  linha(linhaContorno(LARG - 0.01, ALT - 0.01, RAIO - 0.005, -ESP / 2));
+  linha(linhaContorno(LARG, ALT, RAIO, ESP * 0.28), true);
+  linha(linhaContorno(LARG, ALT, RAIO, -ESP * 0.28), true);
 
-  // reator no peito
-  const brilho = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: texturaBrilho(), color: new THREE.Color('#ffd9a0'), transparent: true,
-    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+  // --- frente: tela e Dynamic Island ---
+  const zf = ESP / 2 + 0.002;
+  const larguraTela = LARG - 0.05, alturaTela = ALT - 0.05;
+  linha(linhaContorno(larguraTela, alturaTela, RAIO - 0.022, zf));
+  linha(linhaContorno(0.2, 0.056, 0.028, zf + 0.001, 0, ALT / 2 - 0.085), true);
+
+  const telaCanvas = criarTelaCanvas();
+  const tctx = telaCanvas.getContext('2d');
+  const textura = new THREE.CanvasTexture(telaCanvas);
+  textura.colorSpace = THREE.SRGBColorSpace;
+  const telaGeo = new THREE.ShapeGeometry(retanguloArredondado(larguraTela, alturaTela, RAIO - 0.022), 16);
+  // UV de 0 a 1 na tela inteira
+  const uv = telaGeo.attributes.uv, pos = telaGeo.attributes.position;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / larguraTela + 0.5, pos.getY(i) / alturaTela + 0.5);
+  const telaMesh = new THREE.Mesh(telaGeo, new THREE.MeshBasicMaterial({
+    map: textura, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   }));
-  brilho.scale.set(0.16, 0.16, 1);
-  brilho.position.set(0, caixa.max.y * 0.7, caixa.max.z * 0.7);
-  modelo.add(brilho);
+  telaMesh.position.z = zf + 0.0005;
+  telaMesh.renderOrder = 2;
+  const fundoTela = new THREE.Mesh(telaGeo, new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide }));
+  fundoTela.position.z = zf - 0.004;
+  fundoTela.renderOrder = -1;
+  celular.add(fundoTela, telaMesh);
 
-  const borda = uniMiolo.uBorda.value;
+  // --- traseira: platô de câmeras de ponta a ponta ---
+  const zt = -ESP / 2;
+  const platoAlt = 0.36, platoY = ALT / 2 - 0.02 - platoAlt / 2, platoEsp = 0.022;
+  const platoGeo = new THREE.ExtrudeGeometry(retanguloArredondado(LARG - 0.04, platoAlt, RAIO - 0.02), {
+    depth: platoEsp, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 16,
+  });
+  platoGeo.translate(0, platoY, zt - platoEsp);
+  miolo(platoGeo);
+  linha(linhaContorno(LARG - 0.04, platoAlt, RAIO - 0.02, zt - platoEsp - 0.006, 0, platoY));
+  linha(linhaContorno(LARG - 0.03, platoAlt + 0.01, RAIO - 0.015, zt - 0.001, 0, platoY), true);
+
+  // três lentes em triângulo + flash, LiDAR e microfone
+  const zLente = zt - platoEsp - 0.006;
+  const lentes = [[-0.215, platoY + 0.083], [-0.215, platoY - 0.083], [-0.06, platoY]];
+  for (const [x, y] of lentes) {
+    const anel = new THREE.CylinderGeometry(0.078, 0.078, 0.02, 48, 1, true);
+    anel.rotateX(Math.PI / 2);
+    anel.translate(x, y, zLente - 0.01);
+    miolo(anel);
+    linha(linhaCirculo(0.078, x, y, zLente - 0.02));
+    linha(linhaCirculo(0.078, x, y, zLente));
+    linha(linhaCirculo(0.058, x, y, zLente - 0.021), true);
+    linha(linhaCirculo(0.036, x, y, zLente - 0.022), true);
+    linha(linhaCirculo(0.016, x, y, zLente - 0.023), true);
+  }
+  linha(linhaCirculo(0.026, 0.19, platoY + 0.085, zLente - 0.002));        // flash
+  linha(linhaCirculo(0.03, 0.19, platoY - 0.075, zLente - 0.002));         // LiDAR
+  linha(linhaCirculo(0.009, 0.1, platoY + 0.13, zLente - 0.002), true);    // microfone
+  // logotipo discreto no meio das costas (só um círculo fino)
+  linha(linhaCirculo(0.07, 0, -0.08, zt - 0.002), true);
+
+  // --- botões laterais ---
+  arestas(botao(-1, ALT / 2 - 0.33, 0.07));           // botão de ação
+  arestas(botao(-1, ALT / 2 - 0.46, 0.1));            // volume +
+  arestas(botao(-1, ALT / 2 - 0.59, 0.1));            // volume -
+  arestas(botao(1, ALT / 2 - 0.5, 0.16));             // lateral
+  arestas(botao(1, -0.28, 0.11, 0.004));              // controle da câmera
+
+  // --- embaixo: USB-C e alto-falantes ---
+  const yb = -ALT / 2 - 0.001;
+  const usb = new THREE.BufferGeometry().setFromPoints(
+    retanguloArredondado(0.09, 0.03, 0.015).getPoints(12).map((p) => new THREE.Vector3(p.x, yb, p.y))
+  );
+  linha(usb, true);
+  for (let i = 0; i < 6; i++) {
+    linha(linhaCirculo(0.006, -0.12 - i * 0.022, 0, 0, 12).rotateX(Math.PI / 2).translate(0, yb, 0), true);
+    linha(linhaCirculo(0.006, 0.12 + i * 0.022, 0, 0, 12).rotateX(Math.PI / 2).translate(0, yb, 0), true);
+  }
+
+  cena.add(celular);
+
+  // --- base do holograma: anéis girando embaixo do celular ---
+  const base = new THREE.Group();
+  const matBase = materialLinhas({ ...uniLinhas, uOpacidade: { value: 0.35 } });
+  for (const [r, op] of [[0.55, 1], [0.48, 0.6], [0.3, 0.8]]) {
+    const anel = new THREE.Line(linhaCirculo(r, 0, 0, 0, 96), matBase);
+    anel.rotation.x = Math.PI / 2;
+    anel.scale.setScalar(op === 0.6 ? 1 : 1);
+    base.add(anel);
+  }
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const g = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(Math.cos(a) * 0.5, 0, Math.sin(a) * 0.5), new THREE.Vector3(Math.cos(a) * 0.55, 0, Math.sin(a) * 0.55),
+    ]);
+    base.add(new THREE.Line(g, matBase));
+  }
+  base.position.y = -ALT / 2 - 0.14;
+  cena.add(base);
+
+  // ---------- conteúdo da tela ----------
+  let estadoTela = { modo: 'repouso', inicio: 0, rosto: null, nome: '' };
+  const TW = telaCanvas.width, TH = telaCanvas.height;
+
+  function ilha(ctx) {
+    ctx.fillStyle = '#000';
+    const w = 0.2 / larguraTela * TW, h = 0.056 / alturaTela * TH;
+    const y = (0.085 - 0.025) / alturaTela * TH;
+    ctx.beginPath();
+    ctx.roundRect(TW / 2 - w / 2, y - h / 2 + h / 2, w, h, h / 2);
+    ctx.fill();
+  }
+
+  function grade(ctx, cor, alfa) {
+    ctx.save();
+    ctx.strokeStyle = cor;
+    ctx.globalAlpha = alfa;
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= TW; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, TH); ctx.stroke(); }
+    for (let y = 0; y <= TH; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TW, y); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  function desenharRosto(ctx, img, alfa, revela, escala, brilhoVarredura) {
+    if (!img) return;
+    const w = TW * 0.8 * escala, h = w * (img.height / img.width);
+    const x = (TW - w) / 2, y = TH * 0.33 - h / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, TW, y + h * revela);
+    ctx.clip();
+    ctx.globalAlpha = alfa;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(img, x, y, w, h);
+    if (Math.random() < 0.08) {
+      const fy = y + Math.random() * h * revela, fh = 6 + Math.random() * 20;
+      ctx.drawImage(img, 0, ((fy - y) / h) * img.height, img.width, (fh / h) * img.height, x + (Math.random() - 0.5) * 30, fy, w, fh);
+    }
+    ctx.restore();
+    if (brilhoVarredura > 0 && revela < 1) {
+      const yv = y + h * revela;
+      const g = ctx.createLinearGradient(0, yv - 30, 0, yv + 4);
+      g.addColorStop(0, 'rgba(120,230,255,0)');
+      g.addColorStop(1, `rgba(200,250,255,${0.9 * brilhoVarredura})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, yv - 30, TW, 34);
+    }
+  }
+
+  function texto(ctx, t, x, y, tam, cor, peso = 600, espac = 2) {
+    ctx.font = `${peso} ${tam}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+    ctx.fillStyle = cor;
+    ctx.textAlign = 'center';
+    if ('letterSpacing' in ctx) ctx.letterSpacing = espac + 'px';
+    ctx.fillText(t, x, y);
+  }
+
+  const LOGS = ['núcleo de linguagem', 'personalidade', 'memória de contexto', 'voz e estilo', 'protocolos de segurança'];
+
+  function desenharTela(agora) {
+    const ctx = tctx;
+    ctx.clearRect(0, 0, TW, TH);
+    const t = (agora - estadoTela.inicio) / 1000;
+    const ciano = estadoTela.modo !== 'repouso';
+    const cor = ciano ? '#5fdcff' : '#ff8a4a';
+
+    // fundo suave
+    const fundo = ctx.createLinearGradient(0, 0, 0, TH);
+    fundo.addColorStop(0, ciano ? 'rgba(20,90,140,0.35)' : 'rgba(140,50,20,0.3)');
+    fundo.addColorStop(1, 'rgba(0,0,0,0.05)');
+    ctx.fillStyle = fundo;
+    ctx.fillRect(0, 0, TW, TH);
+    grade(ctx, cor, 0.07);
+
+    if (estadoTela.modo === 'repouso') {
+      const pisca = 0.55 + 0.45 * Math.sin(agora / 400);
+      texto(ctx, '09:41', TW / 2, TH * 0.24, 110, 'rgba(255,190,150,0.55)', 500, 0);
+      texto(ctx, 'AGUARDANDO MÓDULO', TW / 2, TH * 0.62, 30, `rgba(255,170,120,${0.5 * pisca})`);
+      ctx.strokeStyle = 'rgba(255,150,100,0.35)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(TW / 2, TH * 0.75, 46, agora / 500, agora / 500 + 1.2); ctx.stroke();
+    } else if (estadoTela.modo === 'instalando') {
+      // 1) o rosto entra na tela, de cima para baixo
+      const revela = suave(0, 0.9, t);
+      const escala = 1.25 - 0.25 * suave(0, 1.0, t);
+      const alfaRosto = t < 1.0 ? 1 : 0.45 + 0.1 * Math.sin(agora / 90);
+      desenharRosto(ctx, estadoTela.rosto, alfaRosto, revela, escala, 1);
+      // 2) carregamento
+      if (t > 0.9) {
+        const k = suave(0.9, 2.9, t);
+        const cx = TW / 2, cy = TH * 0.71, r = 58;
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = 'rgba(95,220,255,0.18)';
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#7fe6ff';
+        ctx.shadowColor = '#7fe6ff'; ctx.shadowBlur = 16;
+        ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(95,220,255,0.5)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 14, agora / 300, agora / 300 + 0.9); ctx.stroke();
+        texto(ctx, Math.floor(k * 100) + '%', cx, cy + 12, 38, '#dff8ff', 700, 0);
+        texto(ctx, 'INTEGRANDO ' + estadoTela.nome, cx, TH * 0.61, 30, '#9eeaff');
+        const feitos = Math.floor(k * LOGS.length);
+        const atual = LOGS[Math.min(feitos, LOGS.length - 1)];
+        ctx.font = '500 19px "Barlow Condensed", sans-serif';
+        ctx.fillStyle = 'rgba(170,240,255,0.7)';
+        ctx.textAlign = 'center';
+        ctx.fillText('› ' + atual + (k >= 1 ? '  ok' : '...'), TW / 2, TH * 0.81);
+      }
+    } else if (estadoTela.modo === 'pronto') {
+      desenharRosto(ctx, estadoTela.rosto, 0.92 + 0.08 * Math.random(), 1, 1, 0);
+      texto(ctx, estadoTela.nome, TW / 2, TH * 0.66, 64, '#dff8ff', 700, 6);
+      ctx.fillStyle = '#5fffc8';
+      ctx.beginPath(); ctx.arc(TW / 2 - 52, TH * 0.71 - 8, 6, 0, Math.PI * 2); ctx.fill();
+      texto(ctx, 'ONLINE', TW / 2 + 10, TH * 0.71, 28, 'rgba(160,255,220,0.85)');
+    }
+    // linhas de varredura
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    for (let y = 0; y < TH; y += 4) ctx.fillRect(0, y, TW, 1);
+    ilha(ctx);
+    textura.needsUpdate = true;
+  }
+
+  // ---------- movimento ----------
   const relogio = new THREE.Clock();
+  let giro = -0.5;              // rotação atual em y
+  let girando = true;
+  let volta = null;             // { de, para, inicio, dur }
   let troca = null;
-  function quadro() {
+  let versao = 0;
+
+  function quadro(agora) {
     requestAnimationFrame(quadro);
-    const seg = relogio.getElapsedTime();
-    modelo.rotation.y = -0.28 + Math.sin(seg * 0.35) * 0.08;
-    modelo.position.y = Math.sin(seg * 1.1) * 0.006;
+    const dt = Math.min(0.05, relogio.getDelta());
+    const seg = relogio.elapsedTime;
+    if (volta) {
+      const k = Math.min(1, (performance.now() - volta.inicio) / volta.dur);
+      const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      giro = volta.de + (volta.para - volta.de) * e;
+      if (k >= 1) volta = null;
+    } else if (girando) {
+      giro += dt * 0.22;
+    }
+    celular.rotation.y = giro;
+    const tilt = girando ? Math.sin(seg * 0.4) * 0.08 : 0;
+    celular.rotation.x += (tilt - celular.rotation.x) * 0.05;
+    celular.position.y = Math.sin(seg * 0.9) * 0.012;
+    base.rotation.y = seg * 0.3;
+
     if (troca) {
       const k = Math.min(1, (performance.now() - troca.inicio) / troca.duracao);
       const e = k * k * (3 - 2 * k);
-      uniLinhas.uCorte.value = caixa.max.y + 0.05 - e * (caixa.max.y + 0.15);
+      uniLinhas.uCorte.value = ALT / 2 + 0.05 - e * (ALT + 0.4);
       if (k >= 1) troca = null;
     }
-    const ciano = uniLinhas.uCorte.value < caixa.max.y * 0.7;
-    brilho.material.color.set(ciano ? '#9ff8ec' : '#ffd9a0');
-    borda.set(ciano ? '#bff4ff' : '#ffd27a');
-    brilho.material.opacity = 0.8 + 0.2 * Math.sin(seg * 4);
+    const ciano = uniLinhas.uCorte.value < 0;
+    uniMiolo.uBorda.value.set(ciano ? '#bff4ff' : '#ffd27a');
+    desenharTela(agora || performance.now());
     comp.render();
   }
-  quadro();
+  requestAnimationFrame(quadro);
 
   return {
-    paraCiano(duracao) { troca = { inicio: performance.now(), duracao }; },
-    paraLaranja() { troca = null; uniLinhas.uCorte.value = 9; },
+    // volta a tela de frente (giro múltiplo de 2π mais próximo, sempre pra frente)
+    paraFrente(dur = 1500) {
+      girando = false;
+      const alvo = Math.ceil((giro - 0.15) / (Math.PI * 2)) * Math.PI * 2;
+      volta = { de: giro, para: alvo, inicio: performance.now(), dur };
+    },
+    // o rosto entra na tela e carrega; resolve quando termina
+    instalar(rosto, nome) {
+      const v = ++versao;
+      estadoTela = { modo: 'instalando', inicio: performance.now(), rosto, nome: nome.toUpperCase() };
+      setTimeout(() => { if (v === versao) troca = { inicio: performance.now(), duracao: 1800 }; }, 900);
+      return new Promise((ok) => setTimeout(() => {
+        if (v === versao) estadoTela = { ...estadoTela, modo: 'pronto' };
+        ok();
+      }, 3100));
+    },
+    repouso() {
+      versao++;
+      estadoTela = { modo: 'repouso', inicio: performance.now(), rosto: null, nome: '' };
+      troca = null;
+      uniLinhas.uCorte.value = 9;
+      volta = null;
+      girando = true;
+    },
   };
 }

@@ -31,6 +31,11 @@ python3 -m http.server 8000
 
 e abrir `http://localhost:8000`.
 
+## O celular
+
+O iPhone 17 Pro Max em holograma é montado em código (`criarCelular` em `js/holograma.js`), com as medidas reais
+(163,4 × 78 × 8,75 mm), platô de câmeras, três lentes, Dynamic Island e botões laterais.
+
 ## Créditos dos modelos 3D
 
 Os modelos são carregados direto dos repositórios de origem pelo jsDelivr (veja `MODELOS` em `js/holograma.js`).
@@ -38,7 +43,5 @@ Os modelos são carregados direto dos repositórios de origem pelo jsDelivr (vej
 
 - DamagedHelmet: "Battle Damaged Sci-fi Helmet - PBR", de theblueturtle_, licença Creative Commons
   Attribution-NonCommercial 4.0 (Khronos glTF Sample Assets).
-- BrainStem: robô BrainStem, © Smith Micro Software (Poser EULA) e ctxwing (CC BY 4.0)
-  (Khronos glTF Sample Assets).
 - LeePerrySmith: cabeça de Lee Perry-Smith, licença Creative Commons Attribution 3.0, tirada dos
   exemplos do three.js.

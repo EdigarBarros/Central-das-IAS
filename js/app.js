@@ -1,4 +1,4 @@
-import { criarCabeca, criarCorpo } from './holograma.js';
+import { criarCabeca, criarCelular } from './holograma.js';
 import { abrirCofre, lerPrompt } from './cofre.js';
 
 (function () {
@@ -10,7 +10,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   const janela = $('janela');
   let rosto = null;
   let corpo = null;
-  const pronto = Promise.all([criarCabeca($('rosto3d'), $('rosto')), criarCorpo($('corpo3d'))])
+  const pronto = Promise.all([criarCabeca($('rosto3d'), $('rosto')), criarCelular($('corpo3d'))])
     .then(([r, c]) => { rosto = r; corpo = c; })
     .catch((e) => { console.error('Falha ao carregar os modelos 3D', e); });
 
@@ -69,7 +69,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     $('aguardando').hidden = false;
     $('porcento').textContent = '0%';
     $('cargaBarra').style.width = '0%';
-    pronto.then(() => { rosto && rosto.mascara(); corpo && corpo.paraLaranja(); });
+    pronto.then(() => { rosto && rosto.mascara(); corpo && corpo.repouso(); });
     tela.classList.remove('ciano', 'trocando', 'final');
 
     const placa = $('placaNome');
@@ -179,6 +179,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
 
     await pronto;
     if (!rosto || !corpo) { $('dica').textContent = 'Não consegui carregar os modelos 3D. Recarregue a página.'; return; }
+    corpo.paraFrente();
     await rosto.preparar(ia);
     if (!ok()) return;
     $('aguardando').hidden = true;
@@ -203,12 +204,13 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     await fimDoRosto; if (!ok()) return;
     await esperar(500); if (!ok()) return;
 
-    // a janela encolhe e voa até a cabeça do corpo
+    // a janela encolhe e voa para dentro da tela do celular
+    const retrato = rosto.retrato();
     const jr = janela.getBoundingClientRect();
-    const cabeca = $('corpo3d').getBoundingClientRect();
+    const cel = $('corpo3d').getBoundingClientRect();
     const escala = monitorArea.clientWidth / 1600;
-    const dx = (cabeca.left + cabeca.width * 0.5 - (jr.left + jr.width / 2)) / escala;
-    const dy = (cabeca.top + cabeca.height * 0.16 - (jr.top + jr.height / 2)) / escala;
+    const dx = (cel.left + cel.width * 0.5 - (jr.left + jr.width / 2)) / escala;
+    const dy = (cel.top + cel.height * 0.36 - (jr.top + jr.height / 2)) / escala;
     janela.animate(
       [
         { transform: 'translate(0,0) scale(1)', opacity: 1 },
@@ -220,11 +222,10 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     $('nomeFantasma').textContent = nomeNovo;
     $('atualizando').classList.add('visivel');
 
-    await esperar(500); if (!ok()) return;
+    await esperar(700); if (!ok()) return;
     tela.classList.add('trocando');
-    corpo.paraCiano(1600);
+    await corpo.instalar(retrato, ia.nome); if (!ok()) return;
 
-    await esperar(800); if (!ok()) return;
     const placa = $('placaNome');
     placa.classList.remove('apagando');
     placa.classList.add('nova');
