@@ -1,4 +1,4 @@
-import { criarCabeca, criarCelular } from './holograma.js';
+import { criarServidor, criarCelular } from './holograma.js';
 import { abrirCofre, lerPrompt } from './cofre.js';
 
 (function () {
@@ -10,11 +10,10 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   const janela = $('janela');
   let rosto = null;
   let corpo = null;
-  const pronto = Promise.all([criarCabeca($('rosto3d'), $('rosto')), criarCelular($('corpo3d'))])
+  const pronto = Promise.all([criarServidor($('rosto3d'), $('rosto')), criarCelular($('corpo3d'))])
     .then(([r, c]) => { rosto = r; corpo = c; })
     .catch((e) => { console.error('Falha ao carregar os modelos 3D', e); });
 
-  const CHAVE_ANTERIOR = 'central-ias:anterior';
   let carregada = null;     // IA que está no leitor
   let chipNoLeitor = null;  // { el, dx, dy1, dy2, r }
   let sequencia = 0;        // aumenta a cada chip; cancela animações antigas
@@ -25,12 +24,6 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   const sigla = (nome) =>
     nome.trim().toUpperCase().split(/\s+/).map((p) => [...p].join('.') + '.').join(' ');
 
-  function lerAnterior() {
-    try { return localStorage.getItem(CHAVE_ANTERIOR) || IA_ANTERIOR_PADRAO; } catch (e) { return IA_ANTERIOR_PADRAO; }
-  }
-  function salvarAnterior(nome) {
-    try { localStorage.setItem(CHAVE_ANTERIOR, nome); } catch (e) { /* sem armazenamento: tudo bem */ }
-  }
 
   // ---------------- escala do monitor ----------------
   function ajustar() {
@@ -63,7 +56,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   });
 
   // ---------------- estado de espera ----------------
-  function telaEmEspera(nomeAnterior) {
+  function telaEmEspera() {
     janela.getAnimations().forEach((a) => a.cancel());
     janela.classList.remove('voou');
     $('aguardando').hidden = false;
@@ -74,12 +67,13 @@ import { abrirCofre, lerPrompt } from './cofre.js';
 
     const placa = $('placaNome');
     placa.classList.remove('nova', 'apagando');
-    $('placaTexto').textContent = nomeAnterior;
+    $('placaTexto').textContent = '';
+    document.body.style.removeProperty('--cor-ia');
     $('placaSubTexto').textContent = '';
     $('placaSubBarra').getAnimations().forEach((a) => a.cancel());
 
     $('sistemas').innerHTML = '';
-    $('nomeFantasma').textContent = nomeAnterior;
+    $('nomeFantasma').textContent = '';
     $('atualizando').classList.remove('visivel');
     $('leitorLed').classList.remove('aceso', 'lendo');
   }
@@ -131,9 +125,8 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     $('verPrompt').hidden = true;
     document.body.classList.add('ocupado');
     if (chipNoLeitor) {
-      const nomeAnterior = carregada ? sigla(carregada.nome) : lerAnterior();
       await animarSaida();
-      telaEmEspera(nomeAnterior);
+      telaEmEspera();
       if (minha !== sequencia) return;
     }
     carregada = ia;
@@ -147,12 +140,11 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     const minha = ++sequencia;
     fecharProtocolo();
     $('verPrompt').hidden = true;
-    const nomeAnterior = carregada ? sigla(carregada.nome) : lerAnterior();
     carregada = null;
     $('leitorLed').classList.remove('aceso', 'lendo');
     await animarSaida();
     if (minha !== sequencia) return;
-    telaEmEspera(nomeAnterior);
+    telaEmEspera();
     $('dica').textContent = 'Toque em um chip para carregar a IA';
     document.body.classList.remove('ocupado');
   }
@@ -224,13 +216,14 @@ import { abrirCofre, lerPrompt } from './cofre.js';
 
     await esperar(700); if (!ok()) return;
     tela.classList.add('trocando');
-    await corpo.instalar(retrato, ia.nome); if (!ok()) return;
+    await corpo.instalar(retrato, ia.nome, ia.cor); if (!ok()) return;
 
     const placa = $('placaNome');
     placa.classList.remove('apagando');
     placa.classList.add('nova');
     $('placaTexto').textContent = nomeNovo;
-    $('placaSubTexto').textContent = 'OVERRIDE IN PROGRESS';
+    $('placaSubTexto').textContent = 'UPLOAD COMPLETE';
+    document.body.style.setProperty('--cor-ia', ia.cor || '#3fd0ff');
     placa.animate(
       [{ filter: 'brightness(2.2)', transform: 'translateX(-6px)' }, { filter: 'brightness(1)', transform: 'translateX(0)' }],
       { duration: 450, easing: 'ease-out' }
@@ -248,7 +241,6 @@ import { abrirCofre, lerPrompt } from './cofre.js';
       lista.appendChild(li);
     }
 
-    salvarAnterior(nomeNovo);
     await esperar(2000); if (!ok()) return;
     tela.classList.add('final');
     document.body.classList.remove('ocupado');
@@ -304,5 +296,5 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   $('protocolo').addEventListener('click', (e) => { if (e.target === $('protocolo')) fecharProtocolo(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharProtocolo(); });
 
-  telaEmEspera(lerAnterior());
+  telaEmEspera();
 })();

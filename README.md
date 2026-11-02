@@ -31,17 +31,13 @@ python3 -m http.server 8000
 
 e abrir `http://localhost:8000`.
 
-## O celular
+## O 3D
 
-O iPhone 17 Pro Max em holograma é montado em código (`criarCelular` em `js/holograma.js`), com as medidas reais
-(163,4 × 78 × 8,75 mm), platô de câmeras, três lentes, Dynamic Island e botões laterais.
+Tudo é montado em código, sem modelos baixados (`js/holograma.js`):
 
-## Créditos dos modelos 3D
+- `criarServidor`: o rack de servidores que guarda as IAs. A gaveta da IA escolhida acende na cor dela, desliza para
+  fora e solta rastros de energia; o rosto se materializa no meio deles.
+- `criarCelular`: o iPhone 17 Pro Max em holograma, com as medidas reais (163,4 × 78 × 8,75 mm). Fica branco em
+  repouso e assume a cor da IA quando ela é carregada.
 
-Os modelos são carregados direto dos repositórios de origem pelo jsDelivr (veja `MODELOS` em `js/holograma.js`).
-
-
-- DamagedHelmet: "Battle Damaged Sci-fi Helmet - PBR", de theblueturtle_, licença Creative Commons
-  Attribution-NonCommercial 4.0 (Khronos glTF Sample Assets).
-- LeePerrySmith: cabeça de Lee Perry-Smith, licença Creative Commons Attribution 3.0, tirada dos
-  exemplos do three.js.
+Cada IA tem uma `cor` em `ias/lista.js`; o celular, a caixa do nome e os sistemas usam essa cor.

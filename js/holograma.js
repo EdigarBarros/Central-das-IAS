@@ -2,76 +2,17 @@
 // espalhado (bloom). O canvas é desenhado sobre fundo preto e entra na página com "mix-blend-mode: screen",
 // então o preto some e só a luz aparece por cima da interface.
 //
-// Modelos (créditos no README):
-//   DamagedHelmet  -> a máscara da IA anterior
-//   LeePerrySmith  -> o rosto genérico (quando a IA não tem foto)
-//   (o celular é montado em código: criarCelular)
+// Tudo é montado em código (sem modelos baixados): o rack de servidores, à esquerda, e o iPhone, à direita.
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-
-// Os modelos vêm direto dos repositórios de origem (pelo jsDelivr), assim o site fica leve.
-const MODELOS = {
-  capacete: 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb',
-  cabeca: 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/models/gltf/LeePerrySmith/LeePerrySmith.glb',
-};
-
-const carregador = new GLTFLoader();
-const carregar = (url) => carregador.loadAsync(url);
 
 const suave = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
-
-// ---------- utilidades de geometria ----------
-
-// Congela o modelo (inclusive personagens com esqueleto) numa pose e devolve geometrias soltas, no espaço do mundo.
-function congelar(raiz, animacao, instante) {
-  if (animacao) {
-    const mixer = new THREE.AnimationMixer(raiz);
-    mixer.clipAction(animacao).play();
-    mixer.update(instante || 0);
-  }
-  raiz.updateMatrixWorld(true);
-  const saida = [];
-  const v = new THREE.Vector3();
-  raiz.traverse((o) => {
-    if (!o.isMesh) return;
-    if (o.isSkinnedMesh) o.skeleton.update();
-    const pos = o.geometry.attributes.position;
-    const arr = new Float32Array(pos.count * 3);
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i);
-      if (o.isSkinnedMesh) o.applyBoneTransform(i, v);
-      v.applyMatrix4(o.matrixWorld);
-      arr[i * 3] = v.x; arr[i * 3 + 1] = v.y; arr[i * 3 + 2] = v.z;
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
-    if (o.geometry.index) g.setIndex(o.geometry.index.clone());
-    g.computeVertexNormals();
-    saida.push(g);
-  });
-  return saida;
-}
-
-// Centraliza e escala um conjunto de geometrias para caber numa altura.
-function ajustarAltura(geos, altura, pe) {
-  const caixa = new THREE.Box3();
-  geos.forEach((g) => { g.computeBoundingBox(); caixa.union(g.boundingBox); });
-  const tam = caixa.getSize(new THREE.Vector3());
-  const centro = caixa.getCenter(new THREE.Vector3());
-  const k = altura / tam.y;
-  const m = new THREE.Matrix4().makeScale(k, k, k).multiply(
-    new THREE.Matrix4().makeTranslation(-centro.x, pe ? -caixa.min.y : -centro.y, -centro.z)
-  );
-  geos.forEach((g) => { g.applyMatrix4(m); g.computeBoundingBox(); });
-  return new THREE.Box3().copy(caixa).applyMatrix4(m);
-}
 
 function compositor(renderer, cena, camera, L, A, forca) {
   const c = new EffectComposer(renderer);
@@ -231,275 +172,407 @@ async function fotoHolograma(src, L, A) {
   return c;
 }
 
-// Pontos claros de uma imagem, convertidos para o plano 3D na frente da câmera da cabeça.
-function pontosDaImagem(canvas, quantos, camera) {
-  const L = canvas.width, A = canvas.height;
-  const d = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, L, A).data;
-  const candidatos = [];
-  for (let y = 0; y < A; y += 2) {
-    for (let x = 0; x < L; x += 2) {
-      const k = (y * L + x) * 4;
-      const b = (d[k] + d[k + 1] + d[k + 2]) / 765;
-      if (b > 0.18 && Math.random() < b) candidatos.push([x, y]);
+// ============================================================
+// SERVIDOR: rack que guarda as IAs. A gaveta da IA escolhida acende, desliza para fora,
+// solta rastros de energia (como fumaça) e o rosto se materializa no meio deles.
+// ============================================================
+
+// ruído suave (value noise) para a fumaça e para o rosto se materializar
+function criarRuido(L, A, escala, oitavas = 4) {
+  const tam = 64;
+  const base = new Float32Array(tam * tam).map(() => Math.random());
+  const amostra = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const fx = x - xi, fy = y - yi;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const v = (i, j) => base[((j & (tam - 1)) * tam) + (i & (tam - 1))];
+    const a = v(xi, yi), b = v(xi + 1, yi), c = v(xi, yi + 1), d = v(xi + 1, yi + 1);
+    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+  };
+  const saida = new Float32Array(L * A);
+  let min = 9, max = -9;
+  for (let y = 0; y < A; y++) {
+    for (let x = 0; x < L; x++) {
+      let v = 0, amp = 1, f = escala, soma = 0;
+      for (let o = 0; o < oitavas; o++) { v += amostra(x * f, y * f) * amp; soma += amp; amp *= 0.5; f *= 2; }
+      v /= soma;
+      saida[y * L + x] = v;
+      if (v < min) min = v;
+      if (v > max) max = v;
     }
   }
-  const altura = 2 * camera.position.z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  const largura = altura * camera.aspect;
-  const saida = new Float32Array(quantos * 3);
-  for (let i = 0; i < quantos; i++) {
-    const [x, y] = candidatos.length ? candidatos[Math.floor(Math.random() * candidatos.length)] : [L / 2, A / 2];
-    saida[i * 3] = (x / L - 0.5) * largura;
-    saida[i * 3 + 1] = camera.position.y + (0.5 - y / A) * altura;
-    saida[i * 3 + 2] = (Math.random() - 0.5) * 0.3;
-  }
-  return saida;
+  for (let i = 0; i < saida.length; i++) saida[i] = (saida[i] - min) / (max - min);
+  return { mapa: saida, amostra };
 }
 
-// ============================================================
-// CABEÇA: capacete (IA anterior) -> partículas -> rosto (IA nova)
-// ============================================================
-export async function criarCabeca(canvasGL, canvas2D) {
+function hexParaRgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// "rosto" de reserva para uma IA sem imagem: a inicial do nome, acesa
+function rostoReserva(ia, L, A) {
+  const c = document.createElement('canvas');
+  c.width = L; c.height = A;
+  const g = c.getContext('2d');
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, L, A);
+  g.font = `700 ${L * 0.6}px Rajdhani, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = ia.cor || '#3fd0ff';
+  g.shadowBlur = 40;
+  g.fillStyle = ia.cor || '#3fd0ff';
+  g.fillText((ia.nome || '?').trim()[0], L / 2, A / 2);
+  return c;
+}
+
+export async function criarServidor(canvasGL, canvas2D) {
   const L = canvas2D.width, A = canvas2D.height;
   const ctx = canvas2D.getContext('2d');
   const renderer = criarRenderer(canvasGL, L, A, true);
   const cena = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, L / A, 0.1, 100);
-  camera.position.set(0, 1.0, 15);
-  camera.lookAt(0, 1.0, 0);
-  const comp = compositor(renderer, cena, camera, L, A, 0.6);
+  camera.position.set(0, 0.9, 6.4);
+  camera.lookAt(0, -0.05, 0);
+  const comp = compositor(renderer, cena, camera, L, A, 0.7);
 
-  const [gElmo, gRosto] = await Promise.all([carregar(MODELOS.capacete), carregar(MODELOS.cabeca)]);
-
-  // --- capacete ---
-  const geosElmo = congelar(gElmo.scene);
-  ajustarAltura(geosElmo, 5.4, false);
-  geosElmo.forEach((g) => g.translate(0, 1.2, 0));
-  const uniElmoLinhas = {
-    uLinhaA: { value: new THREE.Color('#ff5a3c') }, uLinhaB: { value: new THREE.Color('#ff5a3c') },
-    uCorte: { value: 99 }, uAlfa: { value: 1 }, uOpacidade: { value: 0.26 },
+  const BRANCO = new THREE.Color('#e9f1fa');
+  const uniLinhas = {
+    uLinhaA: { value: BRANCO.clone() }, uLinhaB: { value: BRANCO.clone() },
+    uCorte: { value: 99 }, uAlfa: { value: 1 }, uOpacidade: { value: 0.7 },
   };
-  const uniElmoMiolo = {
-    uMioloA: { value: new THREE.Color('#ff2a1a') }, uMioloB: { value: new THREE.Color('#ff2a1a') },
-    uBorda: { value: new THREE.Color('#5fe4ff') }, uCorte: { value: 99 }, uAlfa: { value: 1 }, uBordaForca: { value: 0.9 },
+  const uniFinas = { ...uniLinhas, uOpacidade: { value: 0.28 } };
+  const uniMiolo = {
+    uMioloA: { value: new THREE.Color('#8fb4d8') }, uMioloB: { value: new THREE.Color('#8fb4d8') },
+    uBorda: { value: new THREE.Color('#ffffff') }, uCorte: { value: 99 }, uAlfa: { value: 0.8 }, uBordaForca: { value: 0.5 },
   };
-  const elmo = new THREE.Group();
-  geosElmo.forEach((g) => {
-    elmo.add(new THREE.Mesh(g, materialMiolo(uniElmoMiolo)));
-    elmo.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 28), materialLinhas(uniElmoLinhas)));
-  });
+  const matLinha = materialLinhas(uniLinhas);
+  const matFina = materialLinhas(uniFinas);
+  const matMiolo = materialMiolo(uniMiolo);
 
-  // --- rosto (cabeça humana, cortada no pescoço) ---
-  let geoRosto = null;
-  gRosto.scene.traverse((o) => { if (o.isMesh && !geoRosto) geoRosto = o.geometry; });
-  geoRosto = geoRosto.clone();
-  geoRosto.computeVertexNormals();
-  const CORTE_PESCOCO = -1.3;
-  const uniRosto = { uAlfa: { value: 0 }, uTempo: { value: 0 }, uPescoco: { value: CORTE_PESCOCO } };
-  const rosto = new THREE.Mesh(geoRosto, new THREE.ShaderMaterial({
-    uniforms: uniRosto,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    vertexShader: /* glsl */ `
-      varying vec3 vN; varying vec3 vV; varying vec3 vP;
-      void main() {
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vP = position;
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: /* glsl */ `
-      uniform float uAlfa; uniform float uTempo; uniform float uPescoco;
-      varying vec3 vN; varying vec3 vV; varying vec3 vP;
-      void main() {
-        vec3 n = normalize(vN);
-        float f = pow(1.0 - abs(dot(n, normalize(vV))), 2.2);
-        float luz = pow(max(dot(n, normalize(vec3(0.0, 0.1, 1.0))), 0.0), 6.0);
-        float b = luz * 0.55 + f * 0.3;
-        vec3 c = mix(vec3(0.05, 0.45, 0.8), vec3(0.8, 0.97, 1.0), smoothstep(0.3, 0.9, b)) * b;
-        float pesc = smoothstep(uPescoco - 0.6, uPescoco + 0.5, vP.y);
-        float linha = 0.7 + 0.3 * step(0.5, fract(gl_FragCoord.y / 3.0));
-        gl_FragColor = vec4(c * uAlfa * pesc * linha * (0.93 + 0.07 * sin(uTempo * 37.0)), 1.0);
-      }`,
-  }));
-
-  // --- partículas: saem dos vértices do capacete e vão para os do rosto ---
-  const posR = geoRosto.attributes.position;
-  const fins = [];
-  for (let i = 0; i < posR.count; i++) if (posR.getY(i) > CORTE_PESCOCO - 0.3) fins.push(i);
-  const posE = [];
-  geosElmo.forEach((g) => { const p = g.attributes.position; for (let i = 0; i < p.count; i++) posE.push(p.getX(i), p.getY(i), p.getZ(i)); });
-  const n = fins.length;
-  const ini = new Float32Array(n * 3), fim = new Float32Array(n * 3), rnd = new Float32Array(n);
-  for (let k = 0; k < n; k++) {
-    const i = fins[k];
-    fim.set([posR.getX(i), posR.getY(i), posR.getZ(i)], k * 3);
-    const j = Math.floor(Math.random() * (posE.length / 3));
-    ini.set([posE[j * 3], posE[j * 3 + 1], posE[j * 3 + 2]], k * 3);
-    rnd[k] = Math.random();
+  // --- rack ---
+  const W = 1.2, H = 2.3, D = 1.0, UNIDADES = 9;
+  const rack = new THREE.Group();
+  const caixa = new THREE.BoxGeometry(W, H, D);
+  rack.add(new THREE.Mesh(caixa, matMiolo));
+  rack.add(new THREE.LineSegments(new THREE.EdgesGeometry(caixa), matLinha));
+  // trilhos e pés
+  for (const x of [-W / 2 + 0.06, W / 2 - 0.06]) {
+    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, -H / 2 + 0.05, D / 2), new THREE.Vector3(x, H / 2 - 0.05, D / 2)]);
+    rack.add(new THREE.Line(g, matFina));
   }
-  const geoP = new THREE.BufferGeometry();
-  geoP.setAttribute('position', new THREE.BufferAttribute(fim.slice(), 3));
-  geoP.setAttribute('aIni', new THREE.BufferAttribute(ini, 3));
-  geoP.setAttribute('aFim', new THREE.BufferAttribute(fim.slice(), 3));
-  geoP.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 1));
-  const uniP = { uProg: { value: 0 }, uAlfa: { value: 0 }, uTempo: { value: 0 }, uTam: { value: 2.0 * renderer.getPixelRatio() } };
-  const particulas = new THREE.Points(geoP, new THREE.ShaderMaterial({
-    uniforms: uniP,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    vertexShader: /* glsl */ `
-      attribute vec3 aIni; attribute vec3 aFim; attribute float aRnd;
-      uniform float uProg; uniform float uTempo; uniform float uTam;
-      varying float vB;
-      void main() {
-        float k = clamp((uProg - aRnd * 0.45) / 0.55, 0.0, 1.0);
-        k = k * k * (3.0 - 2.0 * k);
-        vec3 p = mix(aIni, aFim, k);
-        float voo = sin(k * 3.14159);
-        p += vec3(sin(aRnd * 40.0 + uTempo * 2.0), cos(aRnd * 31.0 + uTempo * 1.6), sin(aRnd * 17.0)) * voo * 1.6;
-        vec4 mv = modelViewMatrix * vec4(p, 1.0);
-        gl_PointSize = uTam * (0.6 + aRnd) * (14.0 / -mv.z);
-        vB = 0.4 + 0.6 * aRnd;
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: /* glsl */ `
-      uniform float uAlfa; varying float vB;
-      void main() {
-        float d = 1.0 - smoothstep(0.1, 0.5, length(gl_PointCoord - 0.5));
-        gl_FragColor = vec4(vec3(0.6, 0.92, 1.0) * vB * d * uAlfa, 1.0);
-      }`,
-  }));
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const pe = new THREE.BoxGeometry(0.1, 0.06, 0.1);
+    pe.translate(x * (W / 2 - 0.08), -H / 2 - 0.03, z * (D / 2 - 0.08));
+    rack.add(new THREE.LineSegments(new THREE.EdgesGeometry(pe), matFina));
+  }
+  // grade de ventilação no topo
+  for (let i = 1; i < 8; i++) {
+    const x = -W / 2 + (W / 8) * i;
+    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, H / 2 + 0.001, -D / 2 + 0.1), new THREE.Vector3(x, H / 2 + 0.001, D / 2 - 0.1)]);
+    rack.add(new THREE.Line(g, matFina));
+  }
+
+  // --- gavetas (servidores 2U) ---
+  const altU = (H - 0.3) / UNIDADES;
+  const gavetas = [];
+  for (let u = 0; u < UNIDADES; u++) {
+    const y = H / 2 - 0.15 - altU * (u + 0.5);
+    const grupo = new THREE.Group();
+    grupo.position.set(0, y, D / 2 - 0.04);
+    const corpoG = new THREE.BoxGeometry(W - 0.14, altU - 0.035, 0.9);
+    corpoG.translate(0, 0, -0.45 + 0.04);
+    grupo.add(new THREE.LineSegments(new THREE.EdgesGeometry(corpoG), matFina));
+    const frente = new THREE.BoxGeometry(W - 0.14, altU - 0.035, 0.03);
+    grupo.add(new THREE.LineSegments(new THREE.EdgesGeometry(frente), matLinha));
+    // ranhuras de ventilação
+    for (let k = 0; k < 6; k++) {
+      const x = -W / 2 + 0.16 + k * 0.045;
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, -altU * 0.28, 0.02), new THREE.Vector3(x, altU * 0.28, 0.02)]);
+      grupo.add(new THREE.Line(g, matFina));
+    }
+    // baias de disco
+    for (let k = 0; k < 4; k++) {
+      const bx = 0.02 + k * 0.1;
+      const g = new THREE.BufferGeometry().setFromPoints(
+        [[-0.04, -0.045], [0.04, -0.045], [0.04, 0.045], [-0.04, 0.045], [-0.04, -0.045]].map(([a, b]) => new THREE.Vector3(bx + a, b, 0.02))
+      );
+      grupo.add(new THREE.Line(g, matFina));
+    }
+    // LEDs (piscam sozinhos)
+    const leds = [];
+    for (let k = 0; k < 3; k++) {
+      const m = new THREE.Mesh(new THREE.CircleGeometry(0.014, 12), new THREE.MeshBasicMaterial({
+        color: '#ffffff', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      m.position.set(W / 2 - 0.13 - k * 0.04, altU * 0.18, 0.021);
+      grupo.add(m);
+      leds.push(m);
+    }
+    // faixa de luz da gaveta (acende com a cor da IA)
+    const faixa = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.16, altU - 0.06), new THREE.MeshBasicMaterial({
+      color: '#ffffff', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    faixa.position.z = 0.022;
+    grupo.add(faixa);
+    rack.add(grupo);
+    gavetas.push({ grupo, leds, faixa, y, fase: Math.random() * 10 });
+  }
+
+  // --- base de projeção ---
+  const base = new THREE.Group();
+  const matBase = materialLinhas({ ...uniLinhas, uOpacidade: { value: 0.3 } });
+  for (const r of [0.95, 0.85, 0.55]) {
+    const anel = new THREE.Line(linhaCirculo(r, 0, 0, 0, 96), matBase);
+    anel.rotation.x = Math.PI / 2;
+    base.add(anel);
+  }
+  base.position.y = -H / 2 - 0.12;
 
   const grupo = new THREE.Group();
-  grupo.add(elmo, rosto, particulas);
+  grupo.add(rack, base);
   cena.add(grupo);
 
-  let modo = 'vazio';
-  let inicio = 0;
-  let foto = null;
-  let aoTerminar = null;
+  // ---------- fumaça de energia (2D, por cima) ----------
+  const rastro = document.createElement('canvas');
+  rastro.width = L; rastro.height = A;
+  const rctx = rastro.getContext('2d');
+  const sprite = document.createElement('canvas');
+  sprite.width = sprite.height = 64;
+  let particulas = [];
+  let corRgb = [63, 208, 255];
+  function pintarSprite() {
+    const g = sprite.getContext('2d');
+    g.clearRect(0, 0, 64, 64);
+    const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    const [cr, cg, cb] = corRgb;
+    r.addColorStop(0, `rgba(${Math.min(255, cr + 80)},${Math.min(255, cg + 80)},${Math.min(255, cb + 80)},0.7)`);
+    r.addColorStop(0.3, `rgba(${cr},${cg},${cb},0.25)`);
+    r.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+    g.fillStyle = r;
+    g.fillRect(0, 0, 64, 64);
+  }
+  pintarSprite();
+  const ruidoFluxo = criarRuido(8, 8, 1, 1);
 
-  function faiscas(intensidade) {
-    if (intensidade <= 0) return;
+  // ---------- rosto que se materializa ----------
+  let rosto = null;          // canvas do rosto (pré-multiplicado sobre preto)
+  let rostoDados = null;     // ImageData do rosto
+  let alvos = [];            // pontos claros do rosto (para a fumaça se juntar)
+  const ruido = criarRuido(L, A, 1 / 46, 4).mapa;
+  const saidaImg = ctx.createImageData(L, A);
+  const saidaCanvas = document.createElement('canvas');
+  saidaCanvas.width = L; saidaCanvas.height = A;
+  const sctx = saidaCanvas.getContext('2d');
+
+  function materializar(r, brilhoBorda) {
+    const src = rostoDados.data, dst = saidaImg.data;
+    const [cr, cg, cb] = corRgb;
+    for (let i = 0, p = 0; i < ruido.length; i++, p += 4) {
+      const dif = r - ruido[i];
+      let k = dif <= 0 ? 0 : dif >= 0.14 ? 1 : dif / 0.14;
+      const borda = dif > 0 && dif < 0.05 ? (1 - dif / 0.05) * brilhoBorda : 0;
+      const forca = (src[p] + src[p + 1] + src[p + 2]) / 765;
+      const b = borda * (0.12 + forca * 0.9);
+      dst[p] = Math.min(255, src[p] * k + (cr + 90) * b);
+      dst[p + 1] = Math.min(255, src[p + 1] * k + (cg + 90) * b);
+      dst[p + 2] = Math.min(255, src[p + 2] * k + (cb + 90) * b);
+      dst[p + 3] = 255;
+    }
+    sctx.putImageData(saidaImg, 0, 0);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.strokeStyle = 'rgba(190, 245, 255, 0.9)';
-    ctx.shadowColor = '#7fe6ff';
-    ctx.shadowBlur = 12;
-    const qtd = Math.floor(4 + 12 * intensidade);
-    for (let k = 0; k < qtd; k++) {
-      const lado = Math.random() < 0.5 ? -1 : 1;
-      let x = L / 2 + lado * (30 + Math.random() * 40);
-      let y = A * 0.4 + (Math.random() - 0.5) * 40;
-      ctx.lineWidth = 0.6 + Math.random() * 1.6;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      const passos = 4 + Math.floor(Math.random() * 6);
-      for (let s = 0; s < passos; s++) {
-        x += lado * (8 + Math.random() * 22) * intensidade;
-        y += (Math.random() - 0.6) * 26;
-        ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-    const g = ctx.createRadialGradient(L / 2, A * 0.4, 10, L / 2, A * 0.4, 180);
-    g.addColorStop(0, `rgba(120, 230, 255, ${0.3 * intensidade})`);
-    g.addColorStop(1, 'rgba(120, 230, 255, 0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, L, A);
+    ctx.drawImage(saidaCanvas, 0, 0);
     ctx.restore();
   }
 
-  function desenharFoto(alfa) {
-    if (!foto || alfa <= 0) return;
+  function desenharRostoPronto(alfa) {
+    if (!rosto || alfa <= 0) return;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = alfa * (0.9 + 0.1 * Math.random());
-    ctx.drawImage(foto, 0, 0);
+    ctx.drawImage(rosto, 0, 0);
     if (Math.random() < 0.05) {
       const y = Math.random() * A, h = 4 + Math.random() * 18, dx = (Math.random() - 0.5) * 24;
-      ctx.drawImage(foto, 0, y, L, h, dx, y, L, h);
+      ctx.drawImage(rosto, 0, y, L, h, dx, y, L, h);
     }
     ctx.restore();
   }
 
-  function estado(alfaElmo, prog, alfaPart, alfaRosto) {
-    uniElmoLinhas.uAlfa.value = alfaElmo;
-    uniElmoMiolo.uAlfa.value = alfaElmo;
-    elmo.visible = alfaElmo > 0.005;
-    uniP.uProg.value = prog;
-    uniP.uAlfa.value = alfaPart;
-    particulas.visible = alfaPart > 0.005;
-    uniRosto.uAlfa.value = foto ? 0 : alfaRosto;
-    rosto.visible = !foto && alfaRosto > 0.005;
+  function telaDe(obj, local) {
+    const v = local.clone();
+    obj.localToWorld(v);
+    v.project(camera);
+    return [(v.x + 1) / 2 * L, (1 - v.y) / 2 * A];
+  }
+
+  function fumaca(t, dt, origem, emitir, juntar) {
+    // apaga devagar o rastro (é isso que dá o ar de fumaça)
+    rctx.save();
+    rctx.globalCompositeOperation = 'destination-out';
+    rctx.fillStyle = 'rgba(0,0,0,0.16)';
+    rctx.fillRect(0, 0, L, A);
+    rctx.restore();
+    // novas partículas saindo da gaveta
+    const novas = Math.random() < emitir * 9 % 1 ? Math.ceil(emitir * 9) : Math.floor(emitir * 9);
+    for (let i = 0; i < novas; i++) {
+      const lado = Math.random() < 0.5 ? -1 : 1;
+      const ang = (lado > 0 ? 0 : Math.PI) + (Math.random() - 0.5) * 1.3;
+      const vel = 70 + Math.random() * 120;
+      particulas.push({
+        x: origem[0] + (Math.random() - 0.5) * 120, y: origem[1] + (Math.random() - 0.5) * 16,
+        vx: Math.cos(ang) * vel, vy: Math.sin(ang) * vel * 0.5 - 40 - Math.random() * 60,
+        vida: 0, max: 0.9 + Math.random() * 1.1, tam: 3 + Math.random() * 7,
+        alvo: alvos.length ? alvos[Math.floor(Math.random() * alvos.length)] : null,
+      });
+    }
+    rctx.save();
+    rctx.globalCompositeOperation = 'lighter';
+    const vivas = [];
+    for (const p of particulas) {
+      p.vida += dt;
+      if (p.vida > p.max) continue;
+      const ang = ruidoFluxo.amostra(p.x * 0.012, p.y * 0.012 + t * 0.4) * Math.PI * 4;
+      p.vx += Math.cos(ang) * 260 * dt;
+      p.vy += Math.sin(ang) * 260 * dt - 30 * dt;
+      if (juntar > 0 && p.alvo) {
+        p.vx += (p.alvo[0] - p.x) * 7 * juntar * dt;
+        p.vy += (p.alvo[1] - p.y) * 7 * juntar * dt;
+      }
+      p.vx *= 1 - 1.6 * dt;
+      p.vy *= 1 - 1.6 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      const k = p.vida / p.max;
+      const tam = p.tam * (0.6 + k * 1.6);
+      rctx.globalAlpha = Math.sin(k * Math.PI) * 0.16;
+      rctx.drawImage(sprite, p.x - tam, p.y - tam, tam * 2, tam * 2);
+      vivas.push(p);
+    }
+    rctx.restore();
+    particulas = vivas;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(rastro, 0, 0);
+    ctx.restore();
+  }
+
+  let modo = 'vazio';
+  let inicio = 0;
+  let escolhida = -1;
+  let aoTerminar = null;
+  let anterior = performance.now();
+
+  function luzes(seg, destaque, fator = 1) {
+    const corIA = `rgb(${corRgb.join(',')})`;
+    gavetas.forEach((g, i) => {
+      g.leds.forEach((led, k) => {
+        const pisca = Math.sin(seg * (2 + k) + g.fase * (k + 1)) > 0.3 ? 1 : 0.25;
+        led.material.opacity = (i === escolhida ? 1 : 0.35 + 0.5 * pisca) * fator;
+        led.material.color.set(i === escolhida ? corIA : '#ffffff');
+      });
+      g.faixa.material.color.set(corIA);
+      g.faixa.material.opacity = (i === escolhida ? destaque * 0.6 : 0) * fator;
+    });
   }
 
   function quadro(agora) {
     requestAnimationFrame(quadro);
+    const dt = Math.min(0.05, (agora - anterior) / 1000);
+    anterior = agora;
     const t = agora - inicio;
     const seg = agora / 1000;
-    uniRosto.uTempo.value = seg;
-    uniP.uTempo.value = seg;
     ctx.clearRect(0, 0, L, A);
     canvasGL.style.visibility = modo === 'vazio' ? 'hidden' : 'visible';
     if (modo === 'vazio') return;
 
     if (modo === 'mascara') {
+      grupo.rotation.set(0, 0.55 + Math.sin(seg * 0.5) * 0.35, 0);
       grupo.position.x = 0;
-      grupo.rotation.set(0.08, 0.6 + Math.sin(seg * 0.6) * 0.35, 0);
-      estado(1, 0, 0, 0);
-    } else if (modo === 'transformando') {
-      // capacete gira até ficar de frente e treme
-      const vira = suave(300, 1500, t);
-      grupo.rotation.set(0.08 * (1 - vira), (0.6 + Math.sin(t / 420) * 0.25) * (1 - vira), 0);
-      const tremor = suave(800, 1400, t) * (1 - suave(1700, 2000, t));
-      grupo.position.x = (Math.random() - 0.5) * 0.18 * tremor;
-      // vira partículas, que voam e montam o rosto
-      const alfaElmo = 1 - suave(1450, 1900, t);
-      const prog = suave(1500, 3500, t);
-      const alfaPart = suave(1400, 1700, t) * (1 - 0.65 * suave(3300, 4000, t));
-      const alfaRosto = suave(3000, 3900, t);
-      estado(alfaElmo, prog, alfaPart, alfaRosto);
+      uniLinhas.uAlfa.value = 1; uniMiolo.uAlfa.value = 0.8;
+      gavetas.forEach((g) => { g.grupo.position.z = D / 2 - 0.04; });
+      luzes(seg, 0);
+      base.rotation.y = seg * 0.3;
       comp.render();
-      faiscas(suave(700, 1300, t) * (1 - suave(2100, 2700, t)));
-      desenharFoto(alfaRosto);
+      return;
+    }
+
+    if (modo === 'transformando') {
+      // 1) o rack vira de frente e a gaveta da IA acende e desliza para fora
+      const vira = suave(0, 1100, t);
+      grupo.rotation.set(0, (0.55 + Math.sin(t / 600) * 0.2) * (1 - vira), 0);
+      const tremor = suave(900, 1300, t) * (1 - suave(1700, 2100, t));
+      grupo.position.x = (Math.random() - 0.5) * 0.06 * tremor;
+      const g = gavetas[escolhida];
+      g.grupo.position.z = D / 2 - 0.04 + 0.55 * suave(500, 1400, t);
+      // 2) o rack se apaga devagar enquanto o rosto aparece
+      const apaga = 1 - 0.8 * suave(1500, 2300, t) - 0.2 * suave(2900, 3500, t);
+      luzes(seg, 0.25 + 0.5 * suave(300, 900, t) + 0.25 * Math.sin(seg * 18) * suave(900, 1400, t), Math.max(0, (apaga - 0.2) / 0.8));
+      uniLinhas.uAlfa.value = apaga; uniMiolo.uAlfa.value = 0.8 * apaga;
+      base.rotation.y = seg * 0.3;
+      comp.render();
+
+      // 3) fumaça de energia saindo da gaveta e se juntando no rosto
+      const origem = telaDe(g.grupo, new THREE.Vector3(0, 0, 0.05));
+      const emitir = suave(800, 1200, t) * (1 - suave(2700, 3300, t));
+      const juntar = suave(1800, 3000, t);
+      fumaca(seg, dt, origem, emitir, juntar);
+
+      // 4) o rosto se materializa no meio da fumaça, com a borda acesa
+      const r = -0.05 + 1.25 * suave(1700, 3600, t);
+      if (r > 0) materializar(Math.min(1.2, r), 1 - suave(3400, 3900, t));
       if (t > 4000) {
         modo = 'rosto';
         grupo.position.x = 0;
         if (aoTerminar) { aoTerminar(); aoTerminar = null; }
       }
       return;
-    } else if (modo === 'rosto') {
-      grupo.rotation.set(0, Math.sin(seg * 0.5) * 0.15, 0);
-      grupo.position.x = Math.random() < 0.04 ? (Math.random() - 0.5) * 0.25 : 0;
-      estado(0, 1, foto ? 0 : 0.35, 1);
     }
-    comp.render();
-    desenharFoto(modo === 'rosto' ? 1 : 0);
+
+    if (modo === 'rosto') {
+      uniLinhas.uAlfa.value = 0; uniMiolo.uAlfa.value = 0;
+      comp.render();
+      fumaca(seg, dt, [L / 2, A / 2], 0, 0);
+      desenharRostoPronto(1);
+    }
   }
   requestAnimationFrame(quadro);
 
   return {
-    // imagem do rosto já formado, para levar até a tela do celular
-    retrato() {
-      if (foto) return foto;
-      const c = document.createElement('canvas');
-      c.width = L; c.height = A;
-      c.getContext('2d').drawImage(canvasGL, 0, 0, L, A);
-      return c;
-    },
+    retrato() { return rosto; },
     vazio() { modo = 'vazio'; },
-    mascara() { modo = 'mascara'; inicio = performance.now(); },
+    mascara() {
+      modo = 'mascara';
+      inicio = performance.now();
+      escolhida = -1;
+      particulas = [];
+      rctx.clearRect(0, 0, L, A);
+    },
     async preparar(ia) {
-      foto = null;
+      corRgb = hexParaRgb(ia.cor || '#3fd0ff');
+      pintarSprite();
+      const lista = window.IAS || [];
+      const i = Math.max(0, lista.indexOf(ia));
+      // espalha as IAs pelas gavetas do rack
+      escolhida = Math.min(UNIDADES - 1, 1 + i * 3);
+      rosto = null;
       if (ia.rosto) {
-        try { foto = await fotoHolograma(ia.rosto, L, A); } catch (e) { console.warn('Não consegui abrir o rosto de', ia.nome, e); }
+        try { rosto = await fotoHolograma(ia.rosto, L, A); } catch (e) { console.warn('Não consegui abrir o rosto de', ia.nome, e); }
       }
-      // as partículas montam o rosto da foto (ou a cabeça 3D, se a IA não tiver foto)
-      const destino = geoP.attributes.aFim;
-      destino.array.set(foto ? pontosDaImagem(foto, n, camera) : fim);
-      destino.needsUpdate = true;
+      if (!rosto) rosto = rostoReserva(ia, L, A);
+      rostoDados = rosto.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, L, A);
+      alvos = [];
+      const d = rostoDados.data;
+      for (let y = 0; y < A; y += 3) {
+        for (let x = 0; x < L; x += 3) {
+          const k = (y * L + x) * 4;
+          if ((d[k] + d[k + 1] + d[k + 2]) / 765 > 0.3) alvos.push([x, y]);
+        }
+      }
+      particulas = [];
+      rctx.clearRect(0, 0, L, A);
     },
     transformar() {
       return new Promise((ok) => {
@@ -569,13 +642,13 @@ export async function criarCelular(canvas) {
   const comp = compositor(renderer, cena, camera, L, A, 0.7);
 
   const uniLinhas = {
-    uLinhaA: { value: new THREE.Color('#ff6a2a') }, uLinhaB: { value: new THREE.Color('#3fd0ff') },
+    uLinhaA: { value: new THREE.Color('#e9f1fa') }, uLinhaB: { value: new THREE.Color('#3fd0ff') },
     uCorte: { value: 9 }, uAlfa: { value: 1 }, uOpacidade: { value: 0.75 },
   };
   const uniFinas = { ...uniLinhas, uOpacidade: { value: 0.32 } };
   const uniMiolo = {
-    uMioloA: { value: new THREE.Color('#ff3a14') }, uMioloB: { value: new THREE.Color('#1f8fff') },
-    uBorda: { value: new THREE.Color('#ffd27a') }, uCorte: uniLinhas.uCorte, uAlfa: { value: 0.9 }, uBordaForca: { value: 0.6 },
+    uMioloA: { value: new THREE.Color('#8fb4d8') }, uMioloB: { value: new THREE.Color('#1f8fff') },
+    uBorda: { value: new THREE.Color('#ffffff') }, uCorte: uniLinhas.uCorte, uAlfa: { value: 0.9 }, uBordaForca: { value: 0.6 },
   };
   const matLinha = materialLinhas(uniLinhas);
   const matFina = materialLinhas(uniFinas);
@@ -737,8 +810,8 @@ export async function criarCelular(canvas) {
     if (brilhoVarredura > 0 && revela < 1) {
       const yv = y + h * revela;
       const g = ctx.createLinearGradient(0, yv - 30, 0, yv + 4);
-      g.addColorStop(0, 'rgba(120,230,255,0)');
-      g.addColorStop(1, `rgba(200,250,255,${0.9 * brilhoVarredura})`);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(1, `rgba(235,245,255,${0.9 * brilhoVarredura})`);
       ctx.fillStyle = g;
       ctx.fillRect(0, yv - 30, TW, 34);
     }
@@ -758,12 +831,15 @@ export async function criarCelular(canvas) {
     const ctx = tctx;
     ctx.clearRect(0, 0, TW, TH);
     const t = (agora - estadoTela.inicio) / 1000;
-    const ciano = estadoTela.modo !== 'repouso';
-    const cor = ciano ? '#5fdcff' : '#ff8a4a';
+    const ativa = estadoTela.modo !== 'repouso';
+    const [cr, cg, cb] = ativa ? estadoTela.rgb : [225, 236, 248];
+    const claro = (a) => `rgba(${Math.min(255, cr + 110)},${Math.min(255, cg + 110)},${Math.min(255, cb + 110)},${a})`;
+    const tom = (a) => `rgba(${cr},${cg},${cb},${a})`;
+    const cor = tom(1);
 
     // fundo suave
     const fundo = ctx.createLinearGradient(0, 0, 0, TH);
-    fundo.addColorStop(0, ciano ? 'rgba(20,90,140,0.35)' : 'rgba(140,50,20,0.3)');
+    fundo.addColorStop(0, `rgba(${cr * 0.3 | 0},${cg * 0.3 | 0},${cb * 0.3 | 0},0.4)`);
     fundo.addColorStop(1, 'rgba(0,0,0,0.05)');
     ctx.fillStyle = fundo;
     ctx.fillRect(0, 0, TW, TH);
@@ -771,9 +847,9 @@ export async function criarCelular(canvas) {
 
     if (estadoTela.modo === 'repouso') {
       const pisca = 0.55 + 0.45 * Math.sin(agora / 400);
-      texto(ctx, '09:41', TW / 2, TH * 0.24, 110, 'rgba(255,190,150,0.55)', 500, 0);
-      texto(ctx, 'AGUARDANDO MÓDULO', TW / 2, TH * 0.62, 30, `rgba(255,170,120,${0.5 * pisca})`);
-      ctx.strokeStyle = 'rgba(255,150,100,0.35)';
+      texto(ctx, '09:41', TW / 2, TH * 0.24, 110, claro(0.6), 500, 0);
+      texto(ctx, 'AGUARDANDO IA', TW / 2, TH * 0.62, 30, claro(0.5 * pisca));
+      ctx.strokeStyle = tom(0.35);
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(TW / 2, TH * 0.75, 46, agora / 500, agora / 500 + 1.2); ctx.stroke();
     } else if (estadoTela.modo === 'instalando') {
@@ -787,26 +863,26 @@ export async function criarCelular(canvas) {
         const k = suave(0.9, 2.9, t);
         const cx = TW / 2, cy = TH * 0.71, r = 58;
         ctx.lineWidth = 6;
-        ctx.strokeStyle = 'rgba(95,220,255,0.18)';
+        ctx.strokeStyle = tom(0.18);
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-        ctx.strokeStyle = '#7fe6ff';
-        ctx.shadowColor = '#7fe6ff'; ctx.shadowBlur = 16;
+        ctx.strokeStyle = claro(1);
+        ctx.shadowColor = cor; ctx.shadowBlur = 16;
         ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); ctx.stroke();
         ctx.shadowBlur = 0;
-        ctx.strokeStyle = 'rgba(95,220,255,0.5)'; ctx.lineWidth = 2;
+        ctx.strokeStyle = tom(0.5); ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(cx, cy, r + 14, agora / 300, agora / 300 + 0.9); ctx.stroke();
-        texto(ctx, Math.floor(k * 100) + '%', cx, cy + 12, 38, '#dff8ff', 700, 0);
-        texto(ctx, 'INTEGRANDO ' + estadoTela.nome, cx, TH * 0.61, 30, '#9eeaff');
+        texto(ctx, Math.floor(k * 100) + '%', cx, cy + 12, 38, claro(1), 700, 0);
+        texto(ctx, 'INTEGRANDO ' + estadoTela.nome, cx, TH * 0.61, 30, claro(0.9));
         const feitos = Math.floor(k * LOGS.length);
         const atual = LOGS[Math.min(feitos, LOGS.length - 1)];
         ctx.font = '500 19px "Barlow Condensed", sans-serif';
-        ctx.fillStyle = 'rgba(170,240,255,0.7)';
+        ctx.fillStyle = claro(0.7);
         ctx.textAlign = 'center';
         ctx.fillText('› ' + atual + (k >= 1 ? '  ok' : '...'), TW / 2, TH * 0.81);
       }
     } else if (estadoTela.modo === 'pronto') {
       desenharRosto(ctx, estadoTela.rosto, 0.92 + 0.08 * Math.random(), 1, 1, 0);
-      texto(ctx, estadoTela.nome, TW / 2, TH * 0.66, 64, '#dff8ff', 700, 6);
+      texto(ctx, estadoTela.nome, TW / 2, TH * 0.66, 64, claro(1), 700, 6);
       ctx.fillStyle = '#5fffc8';
       ctx.beginPath(); ctx.arc(TW / 2 - 52, TH * 0.71 - 8, 6, 0, Math.PI * 2); ctx.fill();
       texto(ctx, 'ONLINE', TW / 2 + 10, TH * 0.71, 28, 'rgba(160,255,220,0.85)');
@@ -825,6 +901,8 @@ export async function criarCelular(canvas) {
   let volta = null;             // { de, para, inicio, dur }
   let troca = null;
   let versao = 0;
+  const BRANCO_BORDA = new THREE.Color('#ffffff');
+  const bordaIA = new THREE.Color('#bff4ff');
 
   function quadro(agora) {
     requestAnimationFrame(quadro);
@@ -850,8 +928,8 @@ export async function criarCelular(canvas) {
       uniLinhas.uCorte.value = ALT / 2 + 0.05 - e * (ALT + 0.4);
       if (k >= 1) troca = null;
     }
-    const ciano = uniLinhas.uCorte.value < 0;
-    uniMiolo.uBorda.value.set(ciano ? '#bff4ff' : '#ffd27a');
+    const trocou = uniLinhas.uCorte.value < 0;
+    uniMiolo.uBorda.value.copy(trocou ? bordaIA : BRANCO_BORDA);
     desenharTela(agora || performance.now());
     comp.render();
   }
@@ -865,9 +943,13 @@ export async function criarCelular(canvas) {
       volta = { de: giro, para: alvo, inicio: performance.now(), dur };
     },
     // o rosto entra na tela e carrega; resolve quando termina
-    instalar(rosto, nome) {
+    instalar(rosto, nome, corIA = '#3fd0ff') {
+      const c = new THREE.Color(corIA);
+      uniLinhas.uLinhaB.value.copy(c);
+      uniMiolo.uMioloB.value.copy(c).multiplyScalar(0.7);
+      bordaIA.copy(c).lerp(new THREE.Color('#ffffff'), 0.55);
       const v = ++versao;
-      estadoTela = { modo: 'instalando', inicio: performance.now(), rosto, nome: nome.toUpperCase() };
+      estadoTela = { modo: 'instalando', inicio: performance.now(), rosto, nome: nome.toUpperCase(), rgb: hexParaRgb(corIA) };
       setTimeout(() => { if (v === versao) troca = { inicio: performance.now(), duracao: 1800 }; }, 900);
       return new Promise((ok) => setTimeout(() => {
         if (v === versao) estadoTela = { ...estadoTela, modo: 'pronto' };

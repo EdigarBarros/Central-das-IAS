@@ -9,7 +9,8 @@
 //   id        identificador sem espaços (é o nome do arquivo do prompt)
 //   etiqueta  o que vai escrito à mão na etiqueta do chip
 //   nome      o nome que aparece na tela (vira "V.E.R.Ô.N.I.C.A." sozinho)
-//   rosto     caminho da imagem do rosto (deixe null para usar o rosto genérico)
+//   rosto     caminho da imagem do rosto (PNG sem fundo, de preferência)
+//   cor       cor da IA: o celular, a caixa do nome e os sistemas assumem essa cor
 //   sistemas  os 5 itens da coluna da direita (no filme: FLIGHT SYSTEM, NAVIGATION SYSTEM...)
 
 window.IAS = [
@@ -17,7 +18,8 @@ window.IAS = [
     id: 'adenor',
     etiqueta: 'ADENOR',
     nome: 'ADENOR',
-    rosto: null,
+    rosto: 'ias/rostos/adenor.png',
+    cor: '#ff8a1e',
     sistemas: ['RABUGICE', 'LEALDADE', 'EXPERIÊNCIA', 'IRONIA', 'PLANEJAMENTO'],
   },
   {
@@ -25,13 +27,15 @@ window.IAS = [
     etiqueta: 'VERÔNICA',
     nome: 'VERÔNICA',
     rosto: 'ias/rostos/veronica.png',
+    cor: '#3fd0ff',
     sistemas: ['SERENIDADE', 'PERSPICÁCIA', 'HUMOR', 'ESTRATÉGIA', 'SENSIBILIDADE'],
   },
   {
     id: 'nicole',
     etiqueta: 'NICOLE',
     nome: 'NICOLE',
-    rosto: null,
+    rosto: 'ias/rostos/nicole.png',
+    cor: '#b46bff',
     sistemas: ['MEDO', 'TIMIDEZ', 'INTELIGÊNCIA', 'DELICADEZA', 'CORAGEM'],
   },
 ];
@@ -39,5 +43,3 @@ window.IAS = [
 // Texto do cabeçalho da caixa do nome (no filme: "MARK XLV OPERATING SYSTEM")
 window.CABECALHO_SISTEMA = 'MARK XLV OPERATING SYSTEM';
 
-// IA que aparece em laranja na primeira vez (antes de você ter carregado alguma)
-window.IA_ANTERIOR_PADRAO = 'J.A.R.V.I.S';

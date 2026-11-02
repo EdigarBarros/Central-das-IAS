@@ -394,3 +394,17 @@ body.ocupado .chip { pointer-events: none; }
 .cofre-caixa .botao { margin-top: 6px; }
 .cofre-caixa .botao:disabled { opacity: .6; cursor: wait; }
 .cofre-aviso { min-height: 20px; margin: 0; font-size: 15px; color: #ff9a7a; }
+
+/* =============== COR DE CADA IA =============== */
+/* a caixa do nome começa vazia e, quando uma IA é carregada, assume a cor dela (--cor-ia) */
+.placa-quadrado { display: none; }
+.placa-nome.nova .placa-caixa {
+  background: linear-gradient(180deg, var(--cor-ia, #2fc4dc), color-mix(in srgb, var(--cor-ia, #2fc4dc) 72%, #000));
+  border-color: color-mix(in srgb, var(--cor-ia, #2fc4dc) 40%, #fff);
+}
+.placa-nome.nova .placa-texto { color: #061c26; }
+.sistemas em { background: var(--cor-ia, var(--ciano)); box-shadow: 0 0 8px var(--cor-ia, var(--ciano)); }
+.protocolo-topo h2 { color: var(--cor-ia, var(--ciano)); text-shadow: 0 0 12px color-mix(in srgb, var(--cor-ia, #3fd8ff) 50%, transparent); }
+.protocolo-rodape .botao:not(.secundario):not(.feito) {
+  background: linear-gradient(180deg, var(--cor-ia, #2fc4dc), color-mix(in srgb, var(--cor-ia, #2fc4dc) 75%, #000));
+}
