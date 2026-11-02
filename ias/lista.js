@@ -24,7 +24,7 @@ window.IAS = [
     id: 'veronica',
     etiqueta: 'VERÔNICA',
     nome: 'VERÔNICA',
-    rosto: null,
+    rosto: 'ias/rostos/veronica.png',
     sistemas: ['SERENIDADE', 'PERSPICÁCIA', 'HUMOR', 'ESTRATÉGIA', 'SENSIBILIDADE'],
   },
   {

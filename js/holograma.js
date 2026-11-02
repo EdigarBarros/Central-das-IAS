@@ -193,22 +193,66 @@ async function fotoHolograma(src, L, A) {
   const c = document.createElement('canvas');
   c.width = L; c.height = A;
   const ctx = c.getContext('2d', { willReadFrequently: true });
-  const esc = Math.max(L / img.width, A / img.height);
-  ctx.drawImage(img, (L - img.width * esc) / 2, (A - img.height * esc) / 2, img.width * esc, img.height * esc);
+  // Imagem com fundo transparente: entra inteira (sem cortar) e com as cores originais.
+  // Foto comum (fundo opaco): preenche a janela e vira holograma ciano.
+  const teste = document.createElement('canvas');
+  teste.width = 32; teste.height = 32;
+  const tctx = teste.getContext('2d', { willReadFrequently: true });
+  tctx.drawImage(img, 0, 0, 32, 32);
+  const amostra = tctx.getImageData(0, 0, 32, 32).data;
+  let transparentes = 0;
+  for (let i = 3; i < amostra.length; i += 4) if (amostra[i] < 250) transparentes++;
+  const temFundoTransparente = transparentes > 32;
+
+  const esc = temFundoTransparente
+    ? Math.min(L / img.width, A / img.height) * 0.94
+    : Math.max(L / img.width, A / img.height);
+  const w = img.width * esc, h = img.height * esc;
+  ctx.drawImage(img, (L - w) / 2, (A - h) / 2 - (temFundoTransparente ? A * 0.03 : 0), w, h);
   const d = ctx.getImageData(0, 0, L, A);
   const p = d.data;
   for (let i = 0; i < p.length; i += 4) {
-    const l = (0.3 * p[i] + 0.59 * p[i + 1] + 0.11 * p[i + 2]) / 255 * (p[i + 3] / 255);
     const x = (i / 4) % L, y = Math.floor(i / 4 / L);
-    const borda = suave(0, 40, x) * suave(0, 40, L - x) * suave(0, 30, y) * suave(0, 50, A - y);
-    const a = suave(0.1, 0.65, l) * borda;
-    p[i] = (40 + 200 * Math.pow(l, 1.5)) * a;
-    p[i + 1] = (170 + 85 * l) * a;
-    p[i + 2] = (230 + 25 * l) * a;
+    const borda = suave(0, 30, x) * suave(0, 30, L - x) * suave(0, 24, y) * suave(0, 40, A - y);
+    if (temFundoTransparente) {
+      // pré-multiplica pela transparência: o fundo vira preto (que some na mistura "screen")
+      const a = (p[i + 3] / 255) * borda;
+      p[i] *= a; p[i + 1] *= a; p[i + 2] *= a;
+    } else {
+      const l = (0.3 * p[i] + 0.59 * p[i + 1] + 0.11 * p[i + 2]) / 255;
+      const a = suave(0.1, 0.65, l) * borda;
+      p[i] = (40 + 200 * Math.pow(l, 1.5)) * a;
+      p[i + 1] = (170 + 85 * l) * a;
+      p[i + 2] = (230 + 25 * l) * a;
+    }
     p[i + 3] = 255;
   }
   ctx.putImageData(d, 0, 0);
   return c;
+}
+
+// Pontos claros de uma imagem, convertidos para o plano 3D na frente da câmera da cabeça.
+function pontosDaImagem(canvas, quantos, camera) {
+  const L = canvas.width, A = canvas.height;
+  const d = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, L, A).data;
+  const candidatos = [];
+  for (let y = 0; y < A; y += 2) {
+    for (let x = 0; x < L; x += 2) {
+      const k = (y * L + x) * 4;
+      const b = (d[k] + d[k + 1] + d[k + 2]) / 765;
+      if (b > 0.18 && Math.random() < b) candidatos.push([x, y]);
+    }
+  }
+  const altura = 2 * camera.position.z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const largura = altura * camera.aspect;
+  const saida = new Float32Array(quantos * 3);
+  for (let i = 0; i < quantos; i++) {
+    const [x, y] = candidatos.length ? candidatos[Math.floor(Math.random() * candidatos.length)] : [L / 2, A / 2];
+    saida[i * 3] = (x / L - 0.5) * largura;
+    saida[i * 3 + 1] = camera.position.y + (0.5 - y / A) * altura;
+    saida[i * 3 + 2] = (Math.random() - 0.5) * 0.3;
+  }
+  return saida;
 }
 
 // ============================================================
@@ -296,7 +340,7 @@ export async function criarCabeca(canvasGL, canvas2D) {
   const geoP = new THREE.BufferGeometry();
   geoP.setAttribute('position', new THREE.BufferAttribute(fim.slice(), 3));
   geoP.setAttribute('aIni', new THREE.BufferAttribute(ini, 3));
-  geoP.setAttribute('aFim', new THREE.BufferAttribute(fim, 3));
+  geoP.setAttribute('aFim', new THREE.BufferAttribute(fim.slice(), 3));
   geoP.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 1));
   const uniP = { uProg: { value: 0 }, uAlfa: { value: 0 }, uTempo: { value: 0 }, uTam: { value: 2.0 * renderer.getPixelRatio() } };
   const particulas = new THREE.Points(geoP, new THREE.ShaderMaterial({
@@ -452,6 +496,10 @@ export async function criarCabeca(canvasGL, canvas2D) {
       if (ia.rosto) {
         try { foto = await fotoHolograma(ia.rosto, L, A); } catch (e) { console.warn('Não consegui abrir o rosto de', ia.nome, e); }
       }
+      // as partículas montam o rosto da foto (ou a cabeça 3D, se a IA não tiver foto)
+      const destino = geoP.attributes.aFim;
+      destino.array.set(foto ? pontosDaImagem(foto, n, camera) : fim);
+      destino.needsUpdate = true;
     },
     transformar() {
       return new Promise((ok) => {
