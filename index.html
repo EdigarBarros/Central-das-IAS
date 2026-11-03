@@ -87,6 +87,18 @@
               <div class="janela-clarao" id="clarao"></div>
             </div>
 
+            <!-- prompt da IA carregada: aparece no lugar da janela depois que o rosto vai para o celular -->
+            <section class="painel-prompt" id="painelPrompt" hidden aria-labelledby="painelPromptTitulo">
+              <header class="painel-prompt-topo">
+                <small>LANGUAGE MODULE // FULL PROTOCOL</small>
+                <h2 id="painelPromptTitulo"></h2>
+              </header>
+              <pre class="painel-prompt-texto" id="painelPromptTexto" tabindex="0"></pre>
+              <footer class="painel-prompt-rodape">
+                <button class="botao" id="copiar" type="button">Copiar prompt</button>
+              </footer>
+            </section>
+
             <!-- corpo em wireframe -->
             <div class="corpo" id="corpo">
               <canvas id="corpo3d" width="460" height="760" aria-hidden="true"></canvas>
@@ -146,28 +158,9 @@
         <div class="leitor-boca"></div>
       </div>
       <div class="chips" id="chips"></div>
-      <button class="botao flutuante" id="verPrompt" hidden>Ver prompt</button>
       <p class="dica" id="dica">Toque em um chip para carregar a IA</p>
     </section>
   </main>
-
-  <!-- ===================== PROMPT ===================== -->
-  <div class="protocolo" id="protocolo" hidden>
-    <div class="protocolo-janela" role="dialog" aria-modal="true" aria-labelledby="protocoloTitulo">
-      <header class="protocolo-topo">
-        <div>
-          <small>LANGUAGE MODULE // FULL PROTOCOL</small>
-          <h2 id="protocoloTitulo">V.E.R.Ô.N.I.C.A.</h2>
-        </div>
-        <button class="botao-fechar" id="fecharProtocolo" aria-label="Fechar">✕</button>
-      </header>
-      <pre class="protocolo-texto" id="protocoloTexto"></pre>
-      <footer class="protocolo-rodape">
-        <button class="botao" id="copiar">Copiar prompt</button>
-        <button class="botao secundario" id="ejetar">Ejetar chip</button>
-      </footer>
-    </div>
-  </div>
 
   <script type="importmap">
     {

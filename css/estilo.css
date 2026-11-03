@@ -503,3 +503,53 @@ body.ocupado .chip { pointer-events: none; }
 @media (orientation: landscape) and (max-height: 500px) {
   .bancada { --chip-l: clamp(40px, calc((100svh - 170px) / 3.2), 90px); --colunas: var(--quantos, 3); --linhas: 1; padding-top: 10px; padding-bottom: 12px; }
 }
+
+/* =============== PROMPT DENTRO DA CENA =============== */
+/* Fica no lugar da janela do servidor. A cena é encolhida para caber na tela, então os tamanhos de letra
+   usam --px (1 pixel real medido dentro da cena): o texto sai sempre com o mesmo tamanho na tela de quem lê. */
+.painel-prompt {
+  position: absolute; left: 330px; top: 118px; width: 420px; height: 680px; z-index: 6;
+  display: flex; flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--cor-ia, #3fd0ff) 45%, rgba(160, 200, 235, 0.45));
+  background: linear-gradient(180deg, rgba(14, 26, 44, 0.94), rgba(8, 16, 30, 0.94));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 calc(var(--px, 1px) * 18) color-mix(in srgb, var(--cor-ia, #3fd0ff) 22%, transparent);
+  clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+  transform-origin: 50% 50%;
+}
+.painel-prompt[hidden] { display: none; }
+.painel-prompt-topo {
+  padding: calc(var(--px, 1px) * 8) calc(var(--px, 1px) * 12);
+  background: linear-gradient(90deg, rgba(120, 150, 185, 0.45), rgba(120, 150, 185, 0.1));
+  border-bottom: 1px solid rgba(160, 200, 235, 0.35);
+}
+.painel-prompt-topo small {
+  display: block; font-size: calc(var(--px, 1px) * 9); letter-spacing: .15em; color: rgba(200, 225, 245, 0.7);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.painel-prompt-topo h2 {
+  margin: calc(var(--px, 1px) * 2) 0 0; font-family: var(--tech); font-size: calc(var(--px, 1px) * 19); letter-spacing: .15em;
+  color: var(--cor-ia, var(--ciano)); text-shadow: 0 0 calc(var(--px, 1px) * 10) color-mix(in srgb, var(--cor-ia, #3fd8ff) 55%, transparent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.painel-prompt-texto {
+  flex: 1; margin: 0; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  padding: calc(var(--px, 1px) * 10) calc(var(--px, 1px) * 12);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: calc(var(--px, 1px) * 11.5); line-height: 1.55; color: #d6e4f2;
+  white-space: pre-wrap; word-break: break-word;
+  scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--cor-ia, #3fd0ff) 60%, transparent) transparent;
+}
+.painel-prompt-texto:focus-visible { outline: 1px solid var(--cor-ia, var(--ciano)); outline-offset: -2px; }
+.painel-prompt-rodape { padding: calc(var(--px, 1px) * 10) calc(var(--px, 1px) * 12); border-top: 1px solid rgba(160, 200, 235, 0.25); }
+.painel-prompt-rodape .botao {
+  width: 100%; letter-spacing: .12em; font-size: calc(var(--px, 1px) * 14); padding: calc(var(--px, 1px) * 10) calc(var(--px, 1px) * 12);
+  clip-path: polygon(calc(var(--px, 1px) * 8) 0, 100% 0, 100% calc(100% - var(--px, 1px) * 8), calc(100% - var(--px, 1px) * 8) 100%, 0 100%, 0 calc(var(--px, 1px) * 8));
+}
+.painel-prompt-rodape .botao:not(.feito) {
+  background: linear-gradient(180deg, var(--cor-ia, #2fc4dc), color-mix(in srgb, var(--cor-ia, #2fc4dc) 72%, #000));
+}
+
+/* celular em pé: mesmo lugar da janela nesse arranjo */
+@media (orientation: portrait) and (max-width: 699px) {
+  .painel-prompt { left: 60px; top: 170px; width: 432px; height: 690px; }
+}

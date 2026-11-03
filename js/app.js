@@ -30,7 +30,10 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   // e encolhe inteira para caber no monitor.
   const escala = () => monitorArea.clientWidth / (tela.offsetWidth || 1600);
   function ajustar() {
-    tela.style.transform = `scale(${escala()})`;
+    const k = escala();
+    tela.style.transform = `scale(${k})`;
+    // 1px "de verdade" medido dentro da cena encolhida: o texto do prompt usa isso para sair sempre legível
+    tela.style.setProperty('--px', (1 / k) + 'px');
   }
   new ResizeObserver(ajustar).observe(monitorArea);
   ajustar();
@@ -67,6 +70,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
 
   // ---------------- estado de espera ----------------
   function telaEmEspera() {
+    esconderPrompt(false);
     tela.querySelectorAll('.voo-rosto').forEach((c) => c.remove());
     janela.getAnimations().forEach((a) => a.cancel());
     janela.classList.remove('voou');
@@ -167,8 +171,6 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   async function aoTocarChip(ia, el) {
     if (chipNoLeitor && chipNoLeitor.el === el) { ejetar(); return; }
     const minha = ++sequencia;
-    fecharProtocolo();
-    $('verPrompt').hidden = true;
     document.body.classList.add('ocupado');
     if (chipNoLeitor) {
       await tirarIADoCelular(minha);
@@ -191,6 +193,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     const ok = () => minha === sequencia;
     $('dica').textContent = 'Removendo ' + carregada.etiqueta + '...';
     tela.classList.remove('final');
+    await esconderPrompt(true); if (!ok()) return;
 
     // sistemas e ligações saem; a caixa do nome pisca e se apaga
     $('sistemas').querySelectorAll('li').forEach((li, i) => li.animate(
@@ -227,8 +230,6 @@ import { abrirCofre, lerPrompt } from './cofre.js';
 
   async function ejetar() {
     const minha = ++sequencia;
-    fecharProtocolo();
-    $('verPrompt').hidden = true;
     document.body.classList.add('ocupado');
     await tirarIADoCelular(minha);
     if (minha !== sequencia) return;
@@ -396,7 +397,7 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     tela.classList.add('final');
     document.body.classList.remove('ocupado');
     $('dica').textContent = ia.etiqueta + ' carregada · toque no chip para ejetar';
-    abrirProtocolo(ia);
+    mostrarPrompt(ia);
   }
 
   // ---------------- painel do prompt ----------------
@@ -410,18 +411,34 @@ import { abrirCofre, lerPrompt } from './cofre.js';
     return cachePrompts[ia.id];
   }
 
-  async function abrirProtocolo(ia) {
-    $('protocoloTitulo').textContent = sigla(ia.nome);
-    $('protocoloTexto').textContent = 'Carregando...';
-    $('protocolo').hidden = false;
-    $('verPrompt').hidden = true;
-    $('protocoloTexto').textContent = await pegarPrompt(ia);
-    $('protocoloTexto').scrollTop = 0;
+  // O prompt aparece dentro da cena, no lugar da janela (que fica vazia depois que o rosto vai para o celular).
+  async function mostrarPrompt(ia) {
+    const painel = $('painelPrompt');
+    $('painelPromptTitulo').textContent = sigla(ia.nome);
+    $('painelPromptTexto').textContent = 'Carregando...';
+    painel.hidden = false;
+    painel.getAnimations().forEach((a) => a.cancel());
+    painel.animate(
+      [{ opacity: 0, transform: 'scale(.94)', filter: 'blur(6px)' }, { opacity: 1, transform: 'scale(1)', filter: 'blur(0px)' }],
+      { duration: 550, easing: 'cubic-bezier(.2,.8,.2,1)' }
+    );
+    const texto = await pegarPrompt(ia);
+    if (carregada !== ia) return;
+    $('painelPromptTexto').textContent = texto;
+    $('painelPromptTexto').scrollTop = 0;
   }
 
-  function fecharProtocolo() {
-    $('protocolo').hidden = true;
-    if (carregada && !document.body.classList.contains('ocupado')) $('verPrompt').hidden = false;
+  async function esconderPrompt(comAnimacao) {
+    const painel = $('painelPrompt');
+    if (painel.hidden) return;
+    if (comAnimacao) {
+      await painel.animate(
+        [{ opacity: 1, transform: 'scale(1)', filter: 'blur(0px)' }, { opacity: 0, transform: 'scale(.94)', filter: 'blur(6px)' }],
+        { duration: 350, easing: 'ease-in', fill: 'forwards' }
+      ).finished.catch(() => {});
+    }
+    painel.getAnimations().forEach((a) => a.cancel());
+    painel.hidden = true;
   }
 
   async function copiar() {
@@ -441,11 +458,6 @@ import { abrirCofre, lerPrompt } from './cofre.js';
   }
 
   $('copiar').addEventListener('click', copiar);
-  $('fecharProtocolo').addEventListener('click', fecharProtocolo);
-  $('ejetar').addEventListener('click', ejetar);
-  $('verPrompt').addEventListener('click', () => carregada && abrirProtocolo(carregada));
-  $('protocolo').addEventListener('click', (e) => { if (e.target === $('protocolo')) fecharProtocolo(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharProtocolo(); });
 
   telaEmEspera();
 })();
